@@ -3,29 +3,94 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Earth Insights</title>
+    <title>Earthlopedia</title>
     <link rel="stylesheet" href="../css/styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="../js/main.js" defer></script>
 </head>
 <body>
-    <div id="main-container">
-        <div id="questionBox">
-            <button id="backButton" onclick="goBack()" class="back-btn">Back</button>
-            <div id="displayedQuestion"></div>
-            <input type="text" id="questionInput" placeholder="Ask something...">
-            <button onclick="askQuestion()" class="ask-btn">Ask</button>
-            <div id="answer"></div>
-            <div id="locationsList" class="collapsible-container">
-                <button onclick="toggleCollapse()" class="collapsible-btn">Locations</button>
-                <div class="collapsible-content">
-                    <!-- JS Populates This -->
+    <div id="map"></div>
+    <div id="topSearchWrapper">
+        <div id="topSearchBar">
+            <div class="top-search-main" onclick="openSearch()">
+                <span id="topSearchQuery"></span>
+                <span class="top-search-edit">&#128269;</span>
+            </div>
+        </div>
+        <div id="topLoadingIndicator">
+            <div class="loading-dots"><span></span><span></span><span></span></div>
+            <div class="loading-label">Exploring the world…</div>
+        </div>
+    </div>
+    <div id="questionBox" class="centered">
+        <div id="summaryTopRow" class="summary-top-row">
+            <button id="backButton" class="back-btn" onclick="goBack()">←</button>
+            <div id="voiceControls" style="display:none;">
+                <div class="voice-controls-row">
+                    <button id="voiceBtn" class="voice-btn" onclick="toggleVoice()">🔊</button>
+                    <button id="playBtn" class="autoplay-btn" onclick="startPlayback()" title="Animate locations appearing on the map one by one">▶ Play</button>
+                    <button id="autoplayBtn" class="autoplay-btn" onclick="toggleAutoplay()" title="Autoplay through summary then each location with narration">▶ Autoplay</button>
                 </div>
             </div>
         </div>
-        <div id="map"></div>
+        <div id="displayedQuestion"></div>
+        <div class="earth-title">🌍 Earthlopedia</div>
+        <div class="search-row">
+            <input type="text" id="questionInput" placeholder="Search any topic, place, or event…" onkeydown="if(event.key==='Enter') askQuestion()">
+            <button onclick="askQuestion()" class="ask-btn">Ask</button>
+        </div>
+        <div class="detail-slider-row">
+            <span class="detail-label">Brief</span>
+            <input type="range" id="detailSlider" min="1" max="5" value="4" class="detail-slider">
+            <span class="detail-label">Detailed</span>
+        </div>
+        <div id="landingSuggestions">
+            <div class="suggestion-chips-row">
+                <div id="randomQuestionChips" class="suggestion-chips"></div>
+                <button id="refreshChipsBtn" class="refresh-chips-btn" onclick="initLandingSuggestions()" title="Refresh suggestions">↺</button>
+            </div>
+            <div class="prompt-builder-wrap">
+                <button class="prompt-builder-toggle" onclick="togglePromptBuilder()">
+                    <span class="pb-toggle-icon" id="pbToggleIcon">▸</span> Prompt ideas
+                </button>
+                <div id="promptBuilderPanel" class="prompt-builder-panel">
+                    <div class="starter-grid" id="starterGrid"></div>
+                </div>
+            </div>
+        </div>
+        <div id="answer"></div>
+        <div id="locationsList" class="collapsible-container">
+            <button onclick="toggleCollapse()" class="collapsible-btn">📍 Locations</button>
+            <div class="collapsible-content"></div>
+        </div>
     </div>
     <div id="timeline-container">
-        <canvas id="timeline"></canvas>
+        <div class="timeline-main-row">
+            <button id="timeline-prev" class="timeline-nav-btn" onclick="prevLocation()">&#8592;</button>
+            <canvas id="timeline"></canvas>
+            <button id="timeline-next" class="timeline-nav-btn" onclick="nextLocation()">&#8594;</button>
+        </div>
+        <div class="timeline-hint">scroll to zoom · drag to pan</div>
+        <div id="period-bar" class="period-bar-row"></div>
+    </div>
+    <div id="stream-ghost"></div>
+    <button id="cancelSearchBtn" class="cancel-search-btn" onclick="cancelSearch()" style="display:none">←</button>
+    <button id="theme-toggle" onclick="toggleTheme()" title="Toggle theme">☀️</button>
+    <div id="map-tooltip"></div>
+    <div id="marker-popout">
+        <div class="mp-img-wrap">
+            <img id="mp-img" class="mp-img" src="" alt="" style="display:none">
+            <div class="mp-img-placeholder">🌍</div>
+        </div>
+        <div class="mp-body">
+            <div class="mp-name"></div>
+            <div class="mp-meta">
+                <span class="mp-year"></span>
+                <span class="mp-event"></span>
+            </div>
+            <div class="mp-extract"></div>
+        </div>
+        <button class="mp-cta" onclick="handlePopoutClick()">Full story →</button>
     </div>
 </body>
 </html>
