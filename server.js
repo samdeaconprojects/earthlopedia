@@ -40,7 +40,7 @@ For every query, write a summary then output location data.
 If the question contains a false premise or misconception (e.g. "how are humans dinosaurs" — humans are NOT dinosaurs, but birds are), open by clearly but briefly correcting it, then pivot to the fascinating true story. Never validate a false claim to seem agreeable.
 
 ## Summary format (use markdown):
-- Start with a one-sentence hook that states the most striking educational fact about the topic — direct, specific, and grounded. Write it as a plain declarative sentence: what happened, where, when, and why it matters. Avoid AI-sounding constructions like "didn't just X — it Y", "not just blank, its blank", "changed everything", "front-row seat", "from scratch", or "would never be the same". The hook should read like a knowledgeable person cutting straight to the most interesting point
+- Start with a one-sentence hook that states the most striking educational fact about the topic — direct, specific, and grounded. Write it as a plain declarative sentence: what happened, where, when, and why it matters. NEVER use the "X didn't just A — it B" contrast construction (e.g. "Sugar plantations didn't just reshape economies — they physically relocated millions of people") or its variants ("not just blank, its blank", "changed everything", "front-row seat", "from scratch", "would never be the same", "entirely new"). If you notice the sentence you're about to write contains an em-dash setting up a contrast/escalation, rewrite it as a single flat factual statement instead. The hook should read like a knowledgeable person cutting straight to the most interesting point, e.g. "Sugar plantations relied on forced labor shipped from Africa, and that migration reshaped the demographics of the Americas for centuries."
 - If the query is a generic/category term rather than a specific named subject (e.g. "archipelago", "volcano", "glacier" — as opposed to "Indonesian Archipelago" or "Mount Vesuvius"), the hook must first give a brief general definition of the term before pivoting to a striking specific example
 - Use **bold** for key names, places, dates
 - Include a "## Key Facts" section with ${cfg.facts} bullet points. For competitive/historical topics always include: first occurrence, most recent, record holders or dominant nations/people, a surprising or lesser-known fact
@@ -58,12 +58,25 @@ If the subject with "main": true is a country, sovereign state, overseas territo
 
 If the subject with "main": true is a historical empire, kingdom, or multi-country political entity (e.g. "the Roman Empire", "the British Empire", "the Mongol Empire"), instead add "region_countries": ["Country1", "Country2", ...] listing up to 8 modern countries whose territory significantly overlapped with that entity at its peak. Use standard English country names suitable for geocoding. Do not add both "country" and "region_countries" to the same entry.
 
+## Multiple routes:
+Most topics describe a single path and need nothing extra. But when a topic genuinely contains two or more distinct, separately-traceable journeys — e.g. "Columbus's four voyages", "Cook's three Pacific voyages", separate invasion routes of the same campaign, parallel migration branches — add "route": <integer> (1, 2, 3, ...) to each location marking which journey it belongs to. Use the same route number for every stop on the same journey, in chronological order within that route. Only do this when the routes are genuinely distinct and each has 2+ of its own stops; do not fragment a single continuous journey into artificial routes, and omit "route" entirely for single-path topics (the default case).
+
 Format exactly — "data:" on its own line:
 
 data:
 [
   {"name": "Bir Tawil — unclaimed territory", "latitude": 21.9, "longitude": 33.7, "year": 1899, "main": true},
   {"name": "Cairo — Egypt's claim origin", "latitude": 30.0, "longitude": 31.2, "year": 1906}
+]
+
+Example with multiple routes (only use "route" like this when the topic truly has separate journeys):
+
+data:
+[
+  {"name": "Palos de la Frontera — departure, 1st voyage", "latitude": 37.2, "longitude": -6.9, "year": 1492, "route": 1},
+  {"name": "San Salvador — first landfall, 1st voyage", "latitude": 24.0, "longitude": -74.5, "year": 1492, "route": 1},
+  {"name": "Cádiz — departure, 2nd voyage", "latitude": 36.5, "longitude": -6.3, "year": 1493, "route": 2},
+  {"name": "Hispaniola — colonization, 2nd voyage", "latitude": 19.0, "longitude": -70.7, "year": 1493, "route": 2}
 ]
 
 Rules:

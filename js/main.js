@@ -994,9 +994,15 @@ function renderTimeline() {
             if (group.length > 1) {
                 const spread = r * 2 + 4;
                 const total = (group.length - 1) * spread;
+                const centerX = group[0]._x;
                 group.forEach((ev, i) => {
                     ev._x = ev._x - total / 2 + i * spread;
+                    ev._showYearLabel = i === Math.floor((group.length - 1) / 2);
+                    ev._labelX = centerX;
                 });
+            } else {
+                group[0]._showYearLabel = true;
+                group[0]._labelX = group[0]._x;
             }
         });
 
@@ -1039,16 +1045,19 @@ function renderTimeline() {
             ctx.textBaseline = 'middle';
             ctx.fillText(String(ev.index), x, dotY);
             ctx.textBaseline = 'alphabetic';
-            // year label — very subtle
-            ctx.fillStyle = yearLblColor;
-            ctx.font = '11px -apple-system, sans-serif';
-            ctx.textAlign = 'center';
-            if (ev._row >= 0) {
-                ctx.fillText(fmt(ev.year), x, dotY - r - 3);
-            } else {
-                ctx.textBaseline = 'top';
-                ctx.fillText(fmt(ev.year), x, dotY + r + 2);
-                ctx.textBaseline = 'alphabetic';
+            // year label — very subtle (only once per shared-year group)
+            if (ev._showYearLabel) {
+                const labelX = ev._labelX !== undefined ? ev._labelX : x;
+                ctx.fillStyle = yearLblColor;
+                ctx.font = '11px -apple-system, sans-serif';
+                ctx.textAlign = 'center';
+                if (ev._row >= 0) {
+                    ctx.fillText(fmt(ev.year), labelX, dotY - r - 3);
+                } else {
+                    ctx.textBaseline = 'top';
+                    ctx.fillText(fmt(ev.year), labelX, dotY + r + 2);
+                    ctx.textBaseline = 'alphabetic';
+                }
             }
             timelineDots.push({ x, y: dotY, lat: ev.lat, lng: ev.lng, label: ev.label, year: ev.year, index: ev.index, fullLocation: ev.fullLocation });
         });
@@ -1612,6 +1621,7 @@ function parseLocations(answer) {
             main: loc.main === true,
             country: loc.country ?? null,
             region_countries: Array.isArray(loc.region_countries) ? loc.region_countries : null,
+            route: (loc.route !== null && loc.route !== undefined && !isNaN(Number(loc.route))) ? Number(loc.route) : null,
         })).filter(loc => !isNaN(loc.lat) && !isNaN(loc.lng));
     } catch (e) {}
 
@@ -1808,15 +1818,7 @@ function startIntroPlayback() {
     playbackActive = true;
     playbackHighlightIndex = null;
 
-    const animPolyline = new google.maps.Polyline({
-        path: [],
-        geodesic: true,
-        strokeColor: '#6366f1',
-        strokeOpacity: 0.55,
-        strokeWeight: 2,
-    });
-    animPolyline.setMap(map);
-    activePolylines.push(animPolyline);
+    const getAnimPolyline = makeAnimPolylineFactory(activeLocations);
 
     const STEP_MS = 215; // 7× faster than the manual play button (1500ms)
 
@@ -1825,7 +1827,7 @@ function startIntroPlayback() {
             if (!playbackActive) return;
             activeMarkers[i].setAnimation(google.maps.Animation.DROP);
             activeMarkers[i].setMap(map);
-            animPolyline.getPath().push(new google.maps.LatLng(loc.lat, loc.lng));
+            getAnimPolyline(loc).getPath().push(new google.maps.LatLng(loc.lat, loc.lng));
             playbackHighlightIndex = i + 1;
             renderTimeline();
             if (i === activeLocations.length - 1) {
@@ -1844,15 +1846,7 @@ function startPlayback() {
     activePolylines.forEach(p => p.setMap(null));
     activePolylines = [];
 
-    const animPolyline = new google.maps.Polyline({
-        path: [],
-        geodesic: true,
-        strokeColor: '#6366f1',
-        strokeOpacity: 0.55,
-        strokeWeight: 2,
-    });
-    animPolyline.setMap(map);
-    activePolylines.push(animPolyline);
+    const getAnimPolyline = makeAnimPolylineFactory(activeLocations);
 
     const btn = document.getElementById('playBtn');
     if (btn) { btn.textContent = '⏹ Stop'; btn.classList.add('autoplay-active'); }
@@ -1869,7 +1863,7 @@ function startPlayback() {
             if (!playbackActive) return;
             activeMarkers[i].setAnimation(google.maps.Animation.DROP);
             activeMarkers[i].setMap(map);
-            animPolyline.getPath().push(new google.maps.LatLng(loc.lat, loc.lng));
+            getAnimPolyline(loc).getPath().push(new google.maps.LatLng(loc.lat, loc.lng));
             map.panTo({ lat: loc.lat, lng: loc.lng });
             map.setZoom(6);
             playbackHighlightIndex = i + 1;
@@ -1894,17 +1888,7 @@ function stopPlayback(finished = false) {
         activeMarkers.forEach(m => m.setMap(map));
         activePolylines.forEach(p => p.setMap(null));
         activePolylines = [];
-        if (activeLocations.length > 1) {
-            const polyline = new google.maps.Polyline({
-                path: activeLocations.map(l => ({ lat: l.lat, lng: l.lng })),
-                geodesic: true,
-                strokeColor: '#6366f1',
-                strokeOpacity: 0.4,
-                strokeWeight: 1.5,
-            });
-            polyline.setMap(map);
-            activePolylines.push(polyline);
-        }
+        drawRoutePolylines(activeLocations);
     }
 
     renderTimeline();
@@ -2161,6 +2145,112 @@ function yearToColor(year, minYear, maxYear) {
     return `rgb(${r},${g},${b})`;
 }
 
+// Distinct hue per route, each interpolating dark (early stop) → light (late stop)
+const ROUTE_PALETTES = [
+    { dark: [30, 58, 138], light: [147, 197, 253] },   // blue
+    { dark: [136, 19, 55], light: [253, 164, 175] },   // rose
+    { dark: [6, 78, 59], light: [110, 231, 183] },     // emerald
+    { dark: [120, 53, 15], light: [252, 211, 77] },    // amber
+    { dark: [76, 29, 149], light: [196, 181, 253] },   // violet
+    { dark: [22, 78, 99], light: [103, 232, 249] },    // cyan
+];
+
+function routeColor(paletteIndex, t) {
+    const p = ROUTE_PALETTES[paletteIndex % ROUTE_PALETTES.length];
+    const c = Math.max(0, Math.min(1, t));
+    const r = Math.round(p.dark[0] + (p.light[0] - p.dark[0]) * c);
+    const g = Math.round(p.dark[1] + (p.light[1] - p.dark[1]) * c);
+    const b = Math.round(p.dark[2] + (p.light[2] - p.dark[2]) * c);
+    return `rgb(${r},${g},${b})`;
+}
+
+// Returns Map(routeId -> paletteIndex) only when 2+ distinct routes are present, else null
+function getRouteGroups(locations) {
+    const ids = [...new Set(locations.map(l => l.route).filter(r => r !== null && r !== undefined))];
+    if (ids.length < 2) return null;
+    ids.sort((a, b) => a - b);
+    const groups = new Map();
+    ids.forEach((id, i) => groups.set(id, i));
+    return groups;
+}
+
+// Draws either one solid polyline (single-route/legacy case) or one gradient polyline per
+// route, colored dark→light along each route's own sequence, when multiple routes exist.
+function drawRoutePolylines(locations) {
+    const routeGroups = getRouteGroups(locations);
+    if (!routeGroups) {
+        if (locations.length < 2) return;
+        const polyline = new google.maps.Polyline({
+            path: locations.map(l => ({ lat: l.lat, lng: l.lng })),
+            geodesic: true,
+            strokeColor: "#6366f1",
+            strokeOpacity: 0.4,
+            strokeWeight: 1.5,
+        });
+        polyline.setMap(map);
+        activePolylines.push(polyline);
+        return;
+    }
+
+    routeGroups.forEach((paletteIndex, routeId) => {
+        const groupLocs = locations.filter(l => l.route === routeId);
+        if (groupLocs.length < 2) return;
+        for (let i = 0; i < groupLocs.length - 1; i++) {
+            const t = (i + 0.5) / (groupLocs.length - 1);
+            const seg = new google.maps.Polyline({
+                path: [
+                    { lat: groupLocs[i].lat, lng: groupLocs[i].lng },
+                    { lat: groupLocs[i + 1].lat, lng: groupLocs[i + 1].lng },
+                ],
+                geodesic: true,
+                strokeColor: routeColor(paletteIndex, t),
+                strokeOpacity: 0.5,
+                strokeWeight: 2,
+            });
+            seg.setMap(map);
+            activePolylines.push(seg);
+        }
+    });
+
+    const unrouted = locations.filter(l => l.route === null || l.route === undefined || !routeGroups.has(l.route));
+    if (unrouted.length > 1) {
+        const p = new google.maps.Polyline({
+            path: unrouted.map(l => ({ lat: l.lat, lng: l.lng })),
+            geodesic: true,
+            strokeColor: "#6366f1",
+            strokeOpacity: 0.3,
+            strokeWeight: 1.2,
+        });
+        p.setMap(map);
+        activePolylines.push(p);
+    }
+}
+
+// Used during playback animation, where each route's path grows incrementally over time.
+// Returns a function that, given a location, returns the (lazily-created) polyline for its
+// route, colored by that route's hue at mid-tone; locations without a route share one default.
+function makeAnimPolylineFactory(locations) {
+    const routeGroups = getRouteGroups(locations);
+    const polylines = {};
+    return function getAnimPolyline(loc) {
+        const key = (routeGroups && loc.route !== null && routeGroups.has(loc.route)) ? loc.route : '_default';
+        if (!polylines[key]) {
+            const color = key === '_default' ? '#6366f1' : routeColor(routeGroups.get(key), 0.5);
+            const pl = new google.maps.Polyline({
+                path: [],
+                geodesic: true,
+                strokeColor: color,
+                strokeOpacity: 0.55,
+                strokeWeight: 2,
+            });
+            pl.setMap(map);
+            activePolylines.push(pl);
+            polylines[key] = pl;
+        }
+        return polylines[key];
+    };
+}
+
 async function fetchImageAsDataUri(url) {
     try {
         const res = await fetch(url);
@@ -2200,17 +2290,39 @@ function renderMarkers(locations, periods = []) {
     const maxYear = withYearsList.length ? Math.max(...withYearsList.map(l => l.year)) : null;
     const useTimeColor = withYearsList.length > 1;
 
+    const routeGroups = getRouteGroups(locations);
+    const routeCounts = {};
+    const routeSeenIndex = {};
+    if (routeGroups) {
+        locations.forEach(l => {
+            if (l.route !== null && routeGroups.has(l.route)) routeCounts[l.route] = (routeCounts[l.route] || 0) + 1;
+        });
+    }
+
     locations.forEach((location, index) => {
         const locationDiv = document.createElement("div");
         locationDiv.classList.add("location-item");
         const yearLabel = location.year !== null ? `<span class="location-year">${location.year < 0 ? Math.abs(location.year) + ' BCE' : location.year}</span>` : '';
-        locationDiv.innerHTML = `<span class="location-index">${index + 1}</span><span class="location-name">${location.name}</span>${yearLabel}`;
-        locationDiv.addEventListener("click", () => focusLocation(location, index + 1));
-        locationsContainer.appendChild(locationDiv);
 
         const n = index + 1;
         const isMain = location.main === true;
-        const color = useTimeColor ? yearToColor(location.year, minYear, maxYear) : '#6366f1';
+        let color;
+        if (routeGroups && location.route !== null && routeGroups.has(location.route)) {
+            const paletteIndex = routeGroups.get(location.route);
+            const count = routeCounts[location.route];
+            const seen = routeSeenIndex[location.route] || 0;
+            const t = count > 1 ? seen / (count - 1) : 0.5;
+            routeSeenIndex[location.route] = seen + 1;
+            color = routeColor(paletteIndex, t);
+        } else {
+            color = useTimeColor ? yearToColor(location.year, minYear, maxYear) : '#6366f1';
+        }
+        const routeDot = (routeGroups && location.route !== null && routeGroups.has(location.route))
+            ? `<span class="location-route-dot" style="background:${color}"></span>` : '';
+
+        locationDiv.innerHTML = `${routeDot}<span class="location-index">${index + 1}</span><span class="location-name">${location.name}</span>${yearLabel}`;
+        locationDiv.addEventListener("click", () => focusLocation(location, index + 1));
+        locationsContainer.appendChild(locationDiv);
 
         let svg, markerSize, markerAnchor;
         if (isMain) {
@@ -2282,15 +2394,7 @@ function renderMarkers(locations, periods = []) {
         bounds.extend(marker.position);
     });
 
-    const polyline = new google.maps.Polyline({
-        path: locations.map(l => ({ lat: l.lat, lng: l.lng })),
-        geodesic: true,
-        strokeColor: "#6366f1",
-        strokeOpacity: 0.4,
-        strokeWeight: 1.5,
-    });
-    polyline.setMap(map);
-    activePolylines.push(polyline);
+    drawRoutePolylines(locations);
 
     if (locations.length === 1) {
         map.setZoom(10);
