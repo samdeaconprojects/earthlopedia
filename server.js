@@ -1,10 +1,44 @@
 const express = require('express');
 const path = require('path');
+const crypto = require('crypto');
 const Anthropic = require('@anthropic-ai/sdk');
 const app = express();
 require('dotenv').config();
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+
+const DAILY_PROMPT_LIMIT = 5;
+const DAY_MS = 24 * 60 * 60 * 1000;
+const usage = new Map(); // visitorId -> { count, resetAt }
+
+function getVisitorId(req, res) {
+    const cookies = Object.fromEntries(
+        (req.headers.cookie || '').split(';').map(c => c.trim().split('=')).filter(p => p[0])
+    );
+    let id = cookies.visitorId;
+    if (!id) {
+        id = crypto.randomUUID();
+        res.setHeader('Set-Cookie', `visitorId=${id}; Max-Age=${60 * 60 * 24 * 365}; Path=/; HttpOnly; SameSite=Lax`);
+    }
+    return id;
+}
+
+function rateLimit(req, res, next) {
+    const id = getVisitorId(req, res);
+    const now = Date.now();
+    let entry = usage.get(id);
+    if (!entry || entry.resetAt <= now) {
+        entry = { count: 0, resetAt: now + DAY_MS };
+        usage.set(id, entry);
+    }
+    if (entry.count >= DAILY_PROMPT_LIMIT) {
+        const minutesLeft = Math.ceil((entry.resetAt - now) / 60000);
+        res.status(429).json({ error: `Daily limit of ${DAILY_PROMPT_LIMIT} searches reached. Try again in ${minutesLeft} minutes.` });
+        return;
+    }
+    entry.count += 1;
+    next();
+}
 
 app.use(express.json());
 app.use('/html', express.static(path.join(__dirname, 'html')));
@@ -15,7 +49,7 @@ app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'html', 'index.html'));
 });
 
-app.post('/ask', async (req, res) => {
+app.post('/ask', rateLimit, async (req, res) => {
     try {
         const question = req.body.question;
         const detailLevel = Math.min(5, Math.max(1, parseInt(req.body.detailLevel) || 4));

@@ -1312,7 +1312,9 @@ async function askQuestion() {
         loader.classList.remove('showing');
         qb.classList.remove('searching');
         answerBox.style.display = '';
-        answerBox.innerHTML = "An error occurred: " + error.toString();
+        answerBox.innerHTML = error.message.includes('Daily limit')
+            ? error.message
+            : "An error occurred: " + error.toString();
     }
 
     if (statesStack.length > 0) {
@@ -1562,6 +1564,11 @@ async function fetchQuestion(question, onChunk) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ question, detailLevel }),
     });
+
+    if (response.status === 429) {
+        const { error } = await response.json().catch(() => ({ error: 'Daily search limit reached.' }));
+        throw new Error(error);
+    }
 
     return new Promise((resolve, reject) => {
         const reader = response.body.getReader();
