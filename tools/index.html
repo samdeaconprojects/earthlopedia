@@ -1,0 +1,123 @@
+<title>Earthlopedia · Dev Tools</title>
+<style>
+  :root {
+    --bg: #eef1ee;
+    --panel: rgba(255, 255, 255, 0.85);
+    --panel-border: rgba(20, 30, 40, 0.1);
+    --ink: rgba(15, 23, 32, 0.92);
+    --ink-dim: rgba(15, 23, 32, 0.58);
+    --ink-faint: rgba(15, 23, 32, 0.36);
+    --accent: #ff6b00;
+    --row-bg-hover: rgba(15, 23, 32, 0.05);
+    --shadow: 0 1px 2px rgba(15, 23, 32, 0.06), 0 8px 24px rgba(15, 23, 32, 0.06);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14171f;
+      --panel: rgba(50, 57, 82, 0.55);
+      --panel-border: rgba(255, 255, 255, 0.1);
+      --ink: rgba(255, 255, 255, 0.92);
+      --ink-dim: rgba(255, 255, 255, 0.6);
+      --ink-faint: rgba(255, 255, 255, 0.38);
+      --row-bg-hover: rgba(255, 255, 255, 0.08);
+      --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 12px 30px rgba(0, 0, 0, 0.35);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #14171f;
+    --panel: rgba(50, 57, 82, 0.55);
+    --panel-border: rgba(255, 255, 255, 0.1);
+    --ink: rgba(255, 255, 255, 0.92);
+    --ink-dim: rgba(255, 255, 255, 0.6);
+    --ink-faint: rgba(255, 255, 255, 0.38);
+    --row-bg-hover: rgba(255, 255, 255, 0.08);
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 12px 30px rgba(0, 0, 0, 0.35);
+  }
+  :root[data-theme="light"] {
+    --bg: #eef1ee;
+    --panel: rgba(255, 255, 255, 0.85);
+    --panel-border: rgba(20, 30, 40, 0.1);
+    --ink: rgba(15, 23, 32, 0.92);
+    --ink-dim: rgba(15, 23, 32, 0.58);
+    --ink-faint: rgba(15, 23, 32, 0.36);
+    --row-bg-hover: rgba(15, 23, 32, 0.05);
+    --shadow: 0 1px 2px rgba(15, 23, 32, 0.06), 0 8px 24px rgba(15, 23, 32, 0.06);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    padding: 32px 24px 80px;
+  }
+  .wrap { max-width: 640px; margin: 0 auto; }
+
+  .eyebrow {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 6px;
+  }
+  h1 { font-size: 24px; font-weight: 700; margin: 0 0 6px; letter-spacing: -0.01em; }
+  .sub { font-size: 13.5px; color: var(--ink-dim); max-width: 56ch; line-height: 1.5; margin: 0 0 24px; }
+
+  .list { display: flex; flex-direction: column; gap: 10px; }
+  a.card {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 14px;
+    box-shadow: var(--shadow);
+    padding: 16px 18px;
+    text-decoration: none;
+    color: inherit;
+  }
+  a.card:hover { background: var(--row-bg-hover); }
+  .card-icon {
+    flex-shrink: 0;
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    background: rgba(255, 107, 0, 0.12);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 19px;
+  }
+  .card-body { flex: 1; min-width: 0; }
+  .card-title { font-size: 14.5px; font-weight: 700; margin: 0 0 2px; }
+  .card-desc { font-size: 12.5px; color: var(--ink-faint); margin: 0; line-height: 1.45; }
+  .card-arrow { color: var(--ink-faint); font-size: 16px; flex-shrink: 0; }
+</style>
+
+<div class="wrap">
+  <p class="eyebrow">Earthlopedia · Dev Tools</p>
+  <h1>Tools</h1>
+  <p class="sub">Local editors that write straight into the app's source files. Dev only — not available in production.</p>
+
+  <div class="list">
+    <a class="card" href="/tools/prompts-editor.html">
+      <div class="card-icon">💬</div>
+      <div class="card-body">
+        <p class="card-title">Example Prompts Editor</p>
+        <p class="card-desc">Manage the landing-page suggestion chips, favorite/pin which ones show first, and edit the prompt-builder topic pools.</p>
+      </div>
+      <div class="card-arrow">→</div>
+    </a>
+
+    <a class="card" href="/tools/globe-editor.html">
+      <div class="card-icon">🌍</div>
+      <div class="card-body">
+        <p class="card-title">Globe Landmass Editor</p>
+        <p class="card-desc">Shape and position the landmasses on the loading globe, then generate the CSS.</p>
+      </div>
+      <div class="card-arrow">→</div>
+    </a>
+  </div>
+</div>

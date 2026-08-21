@@ -4,40 +4,103 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Earthlopedia</title>
+    <link rel="icon" type="image/svg+xml" href="../img/favicon.svg">
     <link rel="stylesheet" href="../css/styles.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Jeju+Myeongjo&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="../js/main.js" defer></script>
 </head>
 <body>
     <div id="map"></div>
-    <div id="topSearchWrapper">
-        <div id="topSearchBar">
-            <div class="top-search-main" onclick="openSearch()">
-                <span id="topSearchQuery"></span>
-                <span class="top-search-edit">&#128269;</span>
+    <div id="topSearchOuter">
+        <div id="topSearchWrapper">
+            <div id="topSearchBar">
+                <div class="top-search-main" onclick="openSearch()">
+                    <span id="topSearchQuery"></span>
+                    <span class="top-search-edit">&#128269;</span>
+                </div>
             </div>
-        </div>
-        <div id="topLoadingIndicator">
-            <div class="loading-dots"><span></span><span></span><span></span></div>
-            <div class="loading-label">Exploring the world…</div>
-        </div>
-    </div>
-    <div id="questionBox" class="centered">
-        <div id="summaryTopRow" class="summary-top-row">
-            <button id="backButton" class="back-btn" onclick="goBack()">←</button>
-            <div id="voiceControls" style="display:none;">
-                <div class="voice-controls-row">
-                    <button id="voiceBtn" class="voice-btn" onclick="toggleVoice()">🔊</button>
-                    <button id="playBtn" class="autoplay-btn" onclick="startPlayback()" title="Animate locations appearing on the map one by one">▶ Play</button>
-                    <button id="autoplayBtn" class="autoplay-btn" onclick="toggleAutoplay()" title="Autoplay through summary then each location with narration">▶ Autoplay</button>
+            <div id="topLoadingIndicator">
+                <span class="earth-logo earth-logo-sm" aria-hidden="true"><span class="earth-logo-inner"></span></span>
+                <div class="loading-text">
+                    <div class="loading-label">Exploring the world…</div>
+                    <div class="loading-eta">Usually takes about 20–40 seconds</div>
                 </div>
             </div>
         </div>
-        <div id="displayedQuestion"></div>
-        <div class="earth-title">🌍 Earthlopedia</div>
+    </div>
+    <!-- Detached from #topSearchOuter so the search bar itself can center on
+         screen (over the title container below it) without these two icon
+         buttons pulling that centered group off to one side — they just
+         hang in the top-right corner instead. -->
+    <div id="topSearchActions">
+        <button id="topSearchClearBtn" class="top-search-clear" onclick="toggleClearDisplay()" title="Hide overlays">&#10005;</button>
+        <button id="resetLayoutBtn" class="top-search-clear reset-layout-btn" onclick="resetPanelLayout()" title="Move panels back to their default positions">&#10554;</button>
+    </div>
+    <div id="currentImagePanel" class="current-image-panel">
+        <button class="drag-handle" title="Drag to move" aria-label="Move panel"><span class="drag-handle-dots"></span></button>
+        <button class="resize-handle" title="Drag to resize" aria-label="Resize panel"><span class="resize-handle-icon"></span></button>
+        <div class="current-image-frame">
+            <img id="currentImageEl" class="current-image-el" src="" alt="" style="display:none">
+            <div id="currentImagePlaceholder" class="current-image-placeholder">🌍</div>
+            <div id="currentImageDesc" class="current-image-desc"></div>
+        </div>
+        <div id="currentImageExtra" class="current-image-extra"></div>
+    </div>
+    <!-- Its own floating card below #currentImagePanel — position/width are
+         synced to it in JS (positionStreetViewSlot in main.js) so it always
+         trails the image panel, even if that panel gets dragged. -->
+    <div id="loc-streetview-slot" class="loc-streetview-thumb" style="display:none"></div>
+    <div id="streetViewModal" class="streetview-modal" style="display:none" onclick="if (event.target === this) closeStreetViewModal();">
+        <button id="streetViewModalClose" class="streetview-modal-close" onclick="closeStreetViewModal()" title="Close">&#10005;</button>
+        <div id="streetViewModalPano" class="streetview-modal-pano"></div>
+    </div>
+    <div id="summaryTitleBar" class="summary-title-bar">
+        <button class="drag-handle" title="Drag to move" aria-label="Move panel"><span class="drag-handle-dots"></span></button>
+        <button class="resize-handle" title="Drag to resize" aria-label="Resize panel"><span class="resize-handle-icon"></span></button>
+        <!-- Kept in the DOM (JS still toggles their display) but permanently
+             hidden — see #backButton, #headerPrevBtn in styles.css. Start/Next
+             now lives down in the timeline bar (#timeline-cta-row) instead of
+             here, so this corner is just the voice controls. -->
+        <button id="backButton" class="back-btn" onclick="goBack()">←</button>
+        <button id="headerPrevBtn" class="header-nav-btn" onclick="prevLocation()" style="display:none" title="Previous location">←</button>
+        <div class="title-bar-corner-left">
+            <button id="overviewBtn" class="overview-btn" onclick="returnToOverview()" style="display:none" title="Back to overview">&#8962;</button>
+        </div>
+        <div class="title-bar-corner-bottom-left">
+            <div id="voiceControls" class="voice-controls-row" style="display:none;">
+                <button id="autoplayBtn" class="icon-toggle-btn" onclick="toggleAutoplay()" title="Play a narrated tour of this summary and its locations (turns on audio)">▶</button>
+                <button id="voiceMuteBtn" class="icon-toggle-btn" onclick="toggleVoiceMute()" title="Mute narration voice">🔊</button>
+            </div>
+        </div>
+        <div class="panel-header">
+            <div class="panel-header-nav">
+                <div id="displayedQuestion" class="summary-title"></div>
+                <div id="locHeaderBlock" class="loc-header-block">
+                    <div id="locHeaderTitle" class="loc-focus-title"></div>
+                </div>
+            </div>
+            <div id="locHeaderEvent" class="loc-focus-event"></div>
+            <div class="panel-header-meta">
+                <span id="locFocusMeta" class="loc-focus-meta"></span>
+                <span id="locHeaderYear" class="loc-focus-year"></span>
+                <span id="locHeaderCoords" class="loc-focus-coords"></span>
+            </div>
+        </div>
+    </div>
+    <div id="questionBox" class="centered">
+        <button class="drag-handle" title="Drag to move" aria-label="Move panel"><span class="drag-handle-dots"></span></button>
+        <button class="resize-handle" title="Drag to resize" aria-label="Resize panel"><span class="resize-handle-icon"></span></button>
+        <button id="cancelSearchBtn" class="cancel-search-btn" onclick="cancelSearch()" style="display:none">←</button>
+        <div class="earth-title"><span class="earth-logo" aria-hidden="true"><span class="earth-logo-inner"></span></span><img class="earth-title-wordmark" src="/img/EarthlopediaLogoStraightReally.svg" alt="Earthlopedia"></div>
         <div class="search-row">
             <input type="text" id="questionInput" placeholder="Search any topic, place, or event…" onkeydown="if(event.key==='Enter') askQuestion()">
             <button onclick="askQuestion()" class="ask-btn">Ask</button>
+            <button id="theme-toggle" onclick="toggleTheme()" title="Toggle app theme">☀️</button>
+            <button id="map-style-toggle" onclick="toggleMapStyle()" title="Toggle map style">🗺️</button>
+            <button id="settings-toggle" onclick="toggleSettingsPopup(event)" title="Settings">⚙️</button>
         </div>
         <div class="detail-slider-row">
             <span class="detail-label">Brief</span>
@@ -58,30 +121,67 @@
                 </div>
             </div>
         </div>
-        <div id="searchDisclaimer" class="search-disclaimer">Results are built on large language models and wikipedia information which can produce incorrect or inappropriate information.</div>
-        <div id="answer"></div>
-        <div id="locationsList" class="collapsible-container">
-            <button onclick="toggleCollapse()" class="collapsible-btn">📍 Locations</button>
-            <div class="collapsible-content"></div>
+        <div id="searchDisclaimer" class="search-disclaimer">Results are built on LLM technology and wikipedia information which can produce incorrect or inappropriate information.</div>
+        <div id="summaryContent" class="summary-content">
+            <div id="answer"></div>
+            <div id="locationsList" class="collapsible-container">
+                <button onclick="toggleCollapse()" class="collapsible-btn">📍 Locations</button>
+                <div class="collapsible-content"></div>
+            </div>
         </div>
     </div>
+    <canvas id="timeline-fade"></canvas>
     <div id="timeline-container">
+        <div id="timeline-period-label" class="timeline-period-label"></div>
         <div class="timeline-main-row">
-            <button id="timeline-prev" class="timeline-nav-btn" onclick="prevLocation()">&#8592;</button>
+            <!-- Overview state (no location focused yet): the four small
+                 step/jump buttons are hidden and this one big button takes
+                 their place. Touring state: this hides and the buttons
+                 handle everything, including "next" — see renderHeaderState
+                 in js/main.js for the toggle. -->
+            <button id="beginJourneyBtn" class="begin-journey-btn timeline-begin-btn" onclick="handleHeaderCta()" style="display:none" title="Start the guided tour of this topic's locations">Start →</button>
+            <button id="timeline-first" class="timeline-nav-btn timeline-end-btn" onclick="firstLocation()" title="First location">&#8676;</button>
+            <button id="timeline-prev" class="timeline-nav-btn timeline-step-btn" onclick="prevLocation()" title="Previous location">&#8592;</button>
             <canvas id="timeline"></canvas>
-            <button id="timeline-next" class="timeline-nav-btn" onclick="nextLocation()">&#8594;</button>
+            <span id="timeline-current-year" class="timeline-current-year"></span>
+            <button id="timeline-next" class="timeline-nav-btn timeline-step-btn" onclick="nextLocation()" title="Next location">&#8594;</button>
+            <button id="timeline-last" class="timeline-nav-btn timeline-end-btn" onclick="lastLocation()" title="Last location">&#8677;</button>
         </div>
-        <div class="timeline-hint">scroll to zoom · drag to pan</div>
-        <div id="period-bar" class="period-bar-row"></div>
     </div>
     <div id="stream-ghost"></div>
-    <button id="cancelSearchBtn" class="cancel-search-btn" onclick="cancelSearch()" style="display:none">←</button>
-    <button id="theme-toggle" onclick="toggleTheme()" title="Toggle theme">☀️</button>
     <div id="map-tooltip"></div>
+    <div id="settingsPopup" class="settings-popup" style="display:none" onclick="event.stopPropagation()">
+        <div class="settings-popup-title">Settings</div>
+        <div class="settings-row">
+            <label for="settingAutoDark" class="settings-label">
+                <span>Auto dark mode at night</span>
+                <span class="settings-sublabel">Switches the app (and map) to dark theme in the evening</span>
+            </label>
+            <input type="checkbox" id="settingAutoDark" class="settings-toggle-input" checked onchange="updateSetting('autoDarkMode', this.checked)">
+        </div>
+        <div class="settings-row settings-row-col">
+            <label for="settingZoom" class="settings-label">
+                <span>Location zoom level</span>
+                <span class="settings-sublabel" id="settingZoomValue">7</span>
+            </label>
+            <input type="range" id="settingZoom" min="3" max="12" step="1" value="7" class="settings-slider" oninput="updateSetting('locationZoom', Number(this.value))">
+        </div>
+        <div class="settings-row settings-row-col">
+            <label class="settings-label"><span>Button color</span></label>
+            <div class="settings-color-row" id="settingsColorRow">
+                <button class="settings-color-swatch" data-color="orange" style="--swatch:#ff6b00" title="Orange" onclick="updateSetting('accentColor','orange')"></button>
+                <button class="settings-color-swatch" data-color="blue" style="--swatch:#2563eb" title="Blue" onclick="updateSetting('accentColor','blue')"></button>
+                <button class="settings-color-swatch" data-color="green" style="--swatch:#16a34a" title="Green" onclick="updateSetting('accentColor','green')"></button>
+                <button class="settings-color-swatch" data-color="purple" style="--swatch:#9333ea" title="Purple" onclick="updateSetting('accentColor','purple')"></button>
+            </div>
+        </div>
+    </div>
     <div id="marker-popout">
+        <button class="mp-close" onclick="dismissMarkerPopout()" title="Dismiss" aria-label="Dismiss">&times;</button>
         <div class="mp-img-wrap">
             <img id="mp-img" class="mp-img" src="" alt="" style="display:none">
             <div class="mp-img-placeholder">🌍</div>
+            <div id="mp-img-desc" class="mp-img-desc"></div>
         </div>
         <div class="mp-body">
             <div class="mp-name"></div>

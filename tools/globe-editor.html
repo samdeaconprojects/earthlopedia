@@ -1,0 +1,893 @@
+<title>Globe Landmass Editor</title>
+<style>
+  :root {
+    --bg: #eef1ee;
+    --panel: rgba(255, 255, 255, 0.85);
+    --panel-border: rgba(20, 30, 40, 0.1);
+    --ink: rgba(15, 23, 32, 0.92);
+    --ink-dim: rgba(15, 23, 32, 0.58);
+    --ink-faint: rgba(15, 23, 32, 0.36);
+    --ocean: #5ab0e0;
+    --ocean-deep: #1c5c8c;
+    --land: #3f8a4c;
+    --accent: #ff6b00;
+    --accent-ink: #ffffff;
+    --grid-line: rgba(15, 23, 32, 0.08);
+    --seam-line: rgba(255, 107, 0, 0.55);
+    --input-bg: rgba(15, 23, 32, 0.04);
+    --card-bg: rgba(15, 23, 32, 0.02);
+    --card-bg-active: rgba(255, 107, 0, 0.06);
+    --code-bg: #182338;
+    --code-ink: rgba(230, 236, 245, 0.92);
+    --code-dim: rgba(230, 236, 245, 0.45);
+    --shadow: 0 1px 2px rgba(15, 23, 32, 0.06), 0 8px 24px rgba(15, 23, 32, 0.06);
+    --danger: #d94b4b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14171f;
+      --panel: rgba(50, 57, 82, 0.55);
+      --panel-border: rgba(255, 255, 255, 0.1);
+      --ink: rgba(255, 255, 255, 0.92);
+      --ink-dim: rgba(255, 255, 255, 0.6);
+      --ink-faint: rgba(255, 255, 255, 0.38);
+      --grid-line: rgba(255, 255, 255, 0.08);
+      --input-bg: rgba(255, 255, 255, 0.06);
+      --card-bg: rgba(255, 255, 255, 0.04);
+      --card-bg-active: rgba(255, 107, 0, 0.1);
+      --code-bg: #0e1320;
+      --code-dim: rgba(230, 236, 245, 0.4);
+      --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 12px 30px rgba(0, 0, 0, 0.35);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #14171f;
+    --panel: rgba(50, 57, 82, 0.55);
+    --panel-border: rgba(255, 255, 255, 0.1);
+    --ink: rgba(255, 255, 255, 0.92);
+    --ink-dim: rgba(255, 255, 255, 0.6);
+    --ink-faint: rgba(255, 255, 255, 0.38);
+    --grid-line: rgba(255, 255, 255, 0.08);
+    --input-bg: rgba(255, 255, 255, 0.06);
+    --card-bg: rgba(255, 255, 255, 0.04);
+    --card-bg-active: rgba(255, 107, 0, 0.1);
+    --code-bg: #0e1320;
+    --code-dim: rgba(230, 236, 245, 0.4);
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 12px 30px rgba(0, 0, 0, 0.35);
+  }
+  :root[data-theme="light"] {
+    --bg: #eef1ee;
+    --panel: rgba(255, 255, 255, 0.85);
+    --panel-border: rgba(20, 30, 40, 0.1);
+    --ink: rgba(15, 23, 32, 0.92);
+    --ink-dim: rgba(15, 23, 32, 0.58);
+    --ink-faint: rgba(15, 23, 32, 0.36);
+    --grid-line: rgba(15, 23, 32, 0.08);
+    --input-bg: rgba(15, 23, 32, 0.04);
+    --card-bg: rgba(15, 23, 32, 0.02);
+    --card-bg-active: rgba(255, 107, 0, 0.06);
+    --code-bg: #182338;
+    --code-dim: rgba(230, 236, 245, 0.45);
+    --shadow: 0 1px 2px rgba(15, 23, 32, 0.06), 0 8px 24px rgba(15, 23, 32, 0.06);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    padding: 32px 24px 64px;
+  }
+
+  .wrap { max-width: 1040px; margin: 0 auto; }
+
+  header { margin-bottom: 24px; }
+  .eyebrow {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 6px;
+  }
+  h1 {
+    font-size: 26px;
+    font-weight: 700;
+    margin: 0 0 6px;
+    letter-spacing: -0.01em;
+    text-wrap: balance;
+  }
+  .sub {
+    font-size: 14px;
+    color: var(--ink-dim);
+    max-width: 66ch;
+    line-height: 1.5;
+    margin: 0;
+  }
+
+  .layout {
+    display: grid;
+    grid-template-columns: 1.4fr 1fr;
+    gap: 20px;
+    margin-top: 24px;
+    align-items: start;
+  }
+  @media (max-width: 780px) {
+    .layout { grid-template-columns: 1fr; }
+  }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 14px;
+    box-shadow: var(--shadow);
+    padding: 18px 20px;
+  }
+  .panel h2 {
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    margin: 0 0 4px;
+    color: var(--ink);
+  }
+  .panel .hint {
+    font-size: 12px;
+    color: var(--ink-faint);
+    margin: 0 0 14px;
+    line-height: 1.5;
+  }
+
+  .panel-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  /* --- editor canvas --- */
+  .editor-shell {
+    border-radius: 10px;
+    overflow: hidden;
+    background: linear-gradient(160deg, var(--ocean-c1, #7fc4ea), var(--ocean-c2, #1c5c8c) 55%, var(--ocean-c3, #0f3a5c));
+    position: relative;
+  }
+  #editorSvg { display: block; width: 100%; height: auto; overflow: hidden; }
+  #editorSvg.dragging .blob-live { cursor: grabbing; }
+  .grid-line { stroke: var(--grid-line); stroke-width: 0.3; }
+  .seam-line { stroke: var(--seam-line); stroke-width: 0.4; stroke-dasharray: 2 1.5; }
+  .ghost { opacity: 0.28; }
+  .ghost ellipse { pointer-events: none; }
+  .blob-live { cursor: grab; }
+  .blob-live:active { cursor: grabbing; }
+  .blob-selected-ring {
+    fill: none;
+    stroke: var(--accent);
+    stroke-width: 0.6;
+    stroke-dasharray: 1.4 1.1;
+  }
+
+  .canvas-caption {
+    display: flex;
+    justify-content: space-between;
+    font-size: 11px;
+    color: var(--ink-faint);
+    margin-top: 8px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* --- ocean colors --- */
+  .ocean-row {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-top: 16px;
+  }
+  .ocean-field {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11.5px;
+    color: var(--ink-dim);
+  }
+  .ocean-field input[type="color"] {
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    border: 1px solid var(--panel-border);
+    border-radius: 6px;
+    background: none;
+    cursor: pointer;
+    appearance: none;
+    -webkit-appearance: none;
+  }
+  .ocean-field input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
+  .ocean-field input[type="color"]::-webkit-color-swatch { border: none; border-radius: 5px; }
+  .ocean-reset {
+    margin-left: auto;
+    font-family: inherit;
+    font-size: 11px;
+    color: var(--ink-faint);
+    background: none;
+    border: none;
+    cursor: pointer;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+  .ocean-reset:hover { color: var(--ink); }
+
+  /* --- save status --- */
+  .save-status {
+    font-size: 11px;
+    margin-top: 8px;
+    min-height: 14px;
+  }
+  .save-status.ok { color: #3f8a4c; }
+  .save-status.err { color: var(--danger); }
+
+  /* --- previews --- */
+  .previews { display: flex; gap: 20px; margin-top: 16px; align-items: flex-end; }
+  .preview-item { text-align: center; }
+  .preview-item label { display: block; font-size: 11px; color: var(--ink-faint); margin-top: 8px; }
+  .globe {
+    position: relative;
+    border-radius: 50%;
+    overflow: hidden;
+    background:
+      radial-gradient(circle at 32% 28%, rgba(255,255,255,0.55), transparent 42%),
+      radial-gradient(circle at 68% 78%, rgba(0,0,0,0.3), transparent 55%),
+      linear-gradient(135deg, var(--ocean-c1, #5ab0e0), var(--ocean-c2, #1c5c8c) 60%, var(--ocean-c3, #0f3a5c));
+    box-shadow: inset -6px -6px 12px rgba(0,0,0,0.35), inset 4px 4px 6px rgba(255,255,255,0.2);
+  }
+  .globe .inner {
+    position: absolute;
+    inset: 0;
+    background-repeat: repeat-x;
+    mix-blend-mode: multiply;
+    animation: spin 6s linear infinite;
+  }
+  @keyframes spin { from { background-position-x: 0; } to { background-position-x: -192px; } }
+  @keyframes spin-big { from { background-position-x: 0; } to { background-position-x: -768px; } }
+  @media (prefers-reduced-motion: reduce) { .globe .inner { animation: none; } }
+  #globeActual { width: 48px; height: 48px; }
+  #globeActual .inner { background-size: 192px 48px; }
+  #globeBig { width: 180px; height: 180px; }
+  #globeBig .inner { background-size: 768px 192px; animation: spin-big 24s linear infinite; }
+  @media (prefers-reduced-motion: reduce) { #globeBig .inner { animation: none; } }
+
+  /* --- blob list --- */
+  .add-btn {
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 7px 12px;
+    border-radius: 8px;
+    border: 1px solid var(--accent);
+    background: var(--accent);
+    color: var(--accent-ink);
+    cursor: pointer;
+    white-space: nowrap;
+    flex: none;
+  }
+  .add-btn:hover { filter: brightness(1.06); }
+
+  .blob-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    max-height: 480px;
+    overflow-y: auto;
+    padding-right: 2px;
+    margin-top: 14px;
+  }
+  .bc {
+    border: 1px solid var(--panel-border);
+    border-radius: 10px;
+    padding: 10px 12px;
+    background: var(--card-bg);
+    transition: background 0.15s, border-color 0.15s;
+  }
+  .bc.active { background: var(--card-bg-active); border-color: var(--accent); }
+  .bc-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+  .bc-swatch {
+    width: 14px;
+    height: 14px;
+    border-radius: 4px;
+    border: 1px solid var(--panel-border);
+    flex: none;
+    cursor: pointer;
+    padding: 0;
+    appearance: none;
+    -webkit-appearance: none;
+    background: none;
+  }
+  .bc-swatch::-webkit-color-swatch-wrapper { padding: 0; }
+  .bc-swatch::-webkit-color-swatch { border: none; border-radius: 3px; }
+  .bc-label { font-size: 12.5px; font-weight: 600; flex: 1; }
+  .bc-icon-btn {
+    border: none;
+    background: none;
+    color: var(--ink-faint);
+    cursor: pointer;
+    font-size: 13px;
+    padding: 2px 4px;
+    line-height: 1;
+  }
+  .bc-icon-btn:hover { color: var(--ink); }
+  .bc-icon-btn.danger:hover { color: var(--danger); }
+
+  .bc-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 6px;
+    margin-bottom: 6px;
+  }
+  .field { display: flex; flex-direction: column; gap: 3px; }
+  .field span {
+    font-size: 9.5px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+  }
+  .field input[type="number"] {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11.5px;
+    padding: 5px 6px;
+    border-radius: 6px;
+    border: 1px solid var(--panel-border);
+    background: var(--input-bg);
+    color: var(--ink);
+    width: 100%;
+    font-variant-numeric: tabular-nums;
+  }
+  .bc-sliders { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .bc-sliders .field { flex-direction: row; align-items: center; gap: 6px; }
+  .bc-sliders .field span { flex: none; width: 30px; text-transform: none; letter-spacing: 0; font-size: 10px; }
+  .bc-sliders input[type="range"] { flex: 1; accent-color: var(--accent); }
+
+  .empty-state {
+    font-size: 12px;
+    color: var(--ink-faint);
+    text-align: center;
+    padding: 20px 0;
+  }
+
+  .global-actions { display: flex; gap: 8px; margin-top: 16px; }
+  button.btn {
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 8px 14px;
+    border-radius: 8px;
+    border: 1px solid var(--panel-border);
+    background: var(--input-bg);
+    color: var(--ink);
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+  }
+  button.btn:hover { border-color: var(--ink-faint); }
+  button.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  button.btn.primary:hover { filter: brightness(1.06); }
+
+  /* --- code panel --- */
+  .code-panel { margin-top: 20px; }
+  .code-box {
+    background: var(--code-bg);
+    color: var(--code-ink);
+    border-radius: 10px;
+    padding: 14px 16px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11.5px;
+    line-height: 1.6;
+    overflow-x: auto;
+    white-space: pre;
+  }
+  .code-actions {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+  }
+  .toast { font-size: 11px; color: var(--accent); opacity: 0; transition: opacity 0.2s ease; }
+  .toast.show { opacity: 1; }
+
+  details.raw { margin-top: 14px; }
+  details.raw summary { font-size: 12px; color: var(--ink-dim); cursor: pointer; }
+</style>
+
+<div class="wrap">
+  <header>
+    <p class="eyebrow">Earthlopedia · spinning logo</p>
+    <h1>Globe Landmass Editor</h1>
+    <p class="sub">Build the continents out of little blobs. Add a blob, drag it into place, resize and rotate it, pick a color — stack a few together to form a landmass. The strip tiles edge-to-edge behind the sphere; the faded ghost copies show how the seam lines up.</p>
+  </header>
+
+  <div class="layout">
+    <div class="panel">
+      <h2>Landmass strip</h2>
+      <p class="hint">192 × 48 units, tiled edge-to-edge. Click a blob to select it, drag to move it.</p>
+      <div class="editor-shell">
+        <svg id="editorSvg" viewBox="0 0 192 48" xmlns="http://www.w3.org/2000/svg"></svg>
+      </div>
+      <div class="canvas-caption">
+        <span id="dragReadout">no blob selected</span>
+        <span>tile: 0–192</span>
+      </div>
+
+      <div class="ocean-row">
+        <label class="ocean-field"><input type="color" id="oceanC1" value="#5ab0e0"> Shallow</label>
+        <label class="ocean-field"><input type="color" id="oceanC2" value="#1c5c8c"> Mid</label>
+        <label class="ocean-field"><input type="color" id="oceanC3" value="#0f3a5c"> Deep</label>
+        <button class="ocean-reset" id="oceanReset">Reset ocean</button>
+      </div>
+
+      <div class="previews">
+        <div class="preview-item">
+          <div class="globe" id="globeActual"><div class="inner" id="globeActualInner"></div></div>
+          <label>Actual size (48px)</label>
+        </div>
+        <div class="preview-item">
+          <div class="globe" id="globeBig"><div class="inner" id="globeBigInner"></div></div>
+          <label>Zoomed preview</label>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head">
+        <div>
+          <h2>Blobs</h2>
+          <p class="hint" style="margin-bottom:0;">Position, size, rotation, color, opacity.</p>
+        </div>
+        <button class="add-btn" id="addBlob">+ Add blob</button>
+      </div>
+      <div class="blob-list" id="blobList"></div>
+      <div class="global-actions">
+        <button class="btn" id="resetAll">Reset all</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel code-panel">
+    <div class="code-actions">
+      <h2 style="margin:0;">CSS to paste into styles.css</h2>
+      <div style="display:flex; align-items:center; gap:10px;">
+        <span class="toast" id="copyToast">Copied</span>
+        <button class="btn" id="copyBtn">Copy CSS</button>
+        <button class="btn primary" id="saveBtn">Save to app</button>
+      </div>
+    </div>
+    <div class="code-box" id="codeOut"></div>
+    <p class="save-status" id="saveStatus"></p>
+    <details class="raw">
+      <summary>View raw SVG markup</summary>
+      <div class="code-box" id="svgOut" style="margin-top:8px;"></div>
+    </details>
+  </div>
+</div>
+
+<script>
+(function () {
+  const PERIOD = 192, H = 48;
+
+  const seedBlobs = () => ([
+    { x: 14, y: 14, rx: 9, ry: 7, rot: -20, color: "#3f8a4c", opacity: 0.95 },
+    { x: 26, y: 18, rx: 8, ry: 9, rot: 15, color: "#357a41", opacity: 0.9 },
+    { x: 18, y: 28, rx: 7, ry: 6, rot: 0, color: "#4a9957", opacity: 0.9 },
+
+    { x: 85, y: 10, rx: 8, ry: 6, rot: 10, color: "#3f8a4c", opacity: 0.95 },
+    { x: 96, y: 16, rx: 7, ry: 9, rot: -10, color: "#357a41", opacity: 0.9 },
+    { x: 92, y: 28, rx: 6, ry: 8, rot: 5, color: "#4a9957", opacity: 0.9 },
+    { x: 100, y: 34, rx: 4, ry: 3.5, rot: 0, color: "#3f8a4c", opacity: 0.9 },
+
+    { x: 146, y: 12, rx: 9, ry: 7, rot: -15, color: "#3f8a4c", opacity: 0.95 },
+    { x: 158, y: 16, rx: 8, ry: 9, rot: 10, color: "#357a41", opacity: 0.9 },
+    { x: 152, y: 28, rx: 7, ry: 7, rot: 0, color: "#4a9957", opacity: 0.9 },
+    { x: 178, y: 11, rx: 4.5, ry: 4.5, rot: 0, color: "#3f8a4c", opacity: 0.9 }
+  ]);
+
+  let blobs = [];
+  let nextId = 1;
+  let selectedId = null;
+  let dragging = null;
+
+  const DEFAULT_OCEAN = { c1: "#5ab0e0", c2: "#1c5c8c", c3: "#0f3a5c" };
+  let ocean = Object.assign({}, DEFAULT_OCEAN);
+
+  function loadSeed() {
+    blobs = seedBlobs().map(function (b) { b.id = nextId++; return b; });
+  }
+  loadSeed();
+
+  const svg = document.getElementById("editorSvg");
+  const blobList = document.getElementById("blobList");
+  const dragReadout = document.getElementById("dragReadout");
+
+  function findBlob(id) { return blobs.find(function (b) { return b.id === id; }); }
+
+  function ellipseAttrs(b) {
+    var t = b.rot ? " transform='rotate(" + b.rot + " " + b.x + " " + b.y + ")'" : "";
+    var op = b.opacity < 1 ? " fill-opacity='" + b.opacity + "'" : "";
+    return "cx='" + b.x + "' cy='" + b.y + "' rx='" + b.rx + "' ry='" + b.ry + "' fill='" + b.color + "'" + op + t;
+  }
+
+  function gridMarkup() {
+    let out = "";
+    for (let x = 0; x <= PERIOD; x += 24) {
+      const cls = (x === 0 || x === PERIOD) ? "seam-line" : "grid-line";
+      out += "<line class=\"" + cls + "\" x1=\"" + x + "\" y1=\"0\" x2=\"" + x + "\" y2=\"" + H + "\"></line>";
+    }
+    for (let y = 0; y <= H; y += 12) {
+      out += "<line class=\"grid-line\" x1=\"0\" y1=\"" + y + "\" x2=\"" + PERIOD + "\" y2=\"" + y + "\"></line>";
+    }
+    return out;
+  }
+
+  function renderCanvas() {
+    let body = "<g>" + gridMarkup() + "</g>";
+
+    [-1, 1].forEach(function (dir) {
+      body += "<g class=\"ghost\" transform=\"translate(" + (dir * PERIOD) + ",0)\">";
+      blobs.forEach(function (b) { body += "<ellipse " + ellipseAttrs(b) + "></ellipse>"; });
+      body += "</g>";
+    });
+
+    blobs.forEach(function (b) {
+      body += "<g class=\"blob-live\" data-id=\"" + b.id + "\">";
+      body += "<ellipse " + ellipseAttrs(b) + "></ellipse>";
+      if (b.id === selectedId) {
+        body += "<ellipse class=\"blob-selected-ring\" cx=\"" + b.x + "\" cy=\"" + b.y + "\" rx=\"" + (b.rx + 1.5) + "\" ry=\"" + (b.ry + 1.5) + "\"" + (b.rot ? " transform=\"rotate(" + b.rot + " " + b.x + " " + b.y + ")\"" : "") + "></ellipse>";
+      }
+      body += "</g>";
+    });
+
+    svg.innerHTML = body;
+    svg.querySelectorAll(".blob-live").forEach(function (g) {
+      g.addEventListener("pointerdown", onPointerDown);
+    });
+    updatePreviews();
+    updateCode();
+  }
+
+  function currentSvgString() {
+    let inner = blobs.map(function (b) { return "<ellipse " + ellipseAttrs(b) + "/>"; }).join("");
+    return "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 48'>" + inner + "</svg>";
+  }
+
+  function updatePreviews() {
+    const svgStr = currentSvgString();
+    const uri = "url(\"data:image/svg+xml;utf8," + svgStr.replace(/#/g, "%23") + "\")";
+    document.getElementById("globeActualInner").style.backgroundImage = uri;
+    document.getElementById("globeBigInner").style.backgroundImage = uri;
+  }
+
+  function applyOcean() {
+    document.documentElement.style.setProperty("--ocean-c1", ocean.c1);
+    document.documentElement.style.setProperty("--ocean-c2", ocean.c2);
+    document.documentElement.style.setProperty("--ocean-c3", ocean.c3);
+  }
+
+  // Mirrors the real .earth-logo / .earth-logo-inner rules in css/styles.css
+  // (72px logo, 288px-wide strip == 4x the 192-unit editor scale).
+  function fullCssBlock() {
+    const uri = currentSvgString().replace(/#/g, "%23");
+    return (
+".earth-logo {\n" +
+"    position: relative;\n" +
+"    display: inline-block;\n" +
+"    width: 72px;\n" +
+"    height: 72px;\n" +
+"    border-radius: 50%;\n" +
+"    overflow: hidden;\n" +
+"    flex: none;\n" +
+"    background:\n" +
+"        radial-gradient(circle at 32% 28%, rgba(255, 255, 255, 0.55), transparent 42%),\n" +
+"        radial-gradient(circle at 68% 78%, rgba(0, 0, 0, 0.3), transparent 55%),\n" +
+"        linear-gradient(135deg, " + ocean.c1 + ", " + ocean.c2 + " 60%, " + ocean.c3 + ");\n" +
+"    box-shadow:\n" +
+"        inset -6px -6px 12px rgba(0, 0, 0, 0.35),\n" +
+"        inset 4px 4px 6px rgba(255, 255, 255, 0.2),\n" +
+"        0 0 0 1px rgba(0, 0, 0, 0.06);\n" +
+"    animation: earth-logo-spin-shade 6s linear infinite;\n" +
+"}\n" +
+"\n" +
+".earth-logo-inner {\n" +
+"    position: absolute;\n" +
+"    inset: 0;\n" +
+"    background-image: url(\"data:image/svg+xml;utf8," + uri + "\");\n" +
+"    background-size: 288px 72px;\n" +
+"    background-repeat: repeat-x;\n" +
+"    mix-blend-mode: multiply;\n" +
+"    animation: earth-logo-spin 6s linear infinite;\n" +
+"}\n" +
+"\n" +
+"@keyframes earth-logo-spin {\n" +
+"    from { background-position-x: 0; }\n" +
+"    to { background-position-x: -288px; }\n" +
+"}\n" +
+"\n" +
+"@keyframes earth-logo-spin-shade {\n" +
+"    0%, 100% { filter: brightness(1); }\n" +
+"    50% { filter: brightness(1.06); }\n" +
+"}"
+    );
+  }
+
+  function updateCode() {
+    document.getElementById("codeOut").textContent = fullCssBlock();
+    document.getElementById("svgOut").textContent = currentSvgString();
+  }
+
+  function buildBlobList() {
+    if (!blobs.length) {
+      blobList.innerHTML = "<div class=\"empty-state\">No blobs yet — add one to start building a continent.</div>";
+      return;
+    }
+    blobList.innerHTML = blobs.map(function (b, i) {
+      const active = b.id === selectedId ? " active" : "";
+      return (
+        "<div class=\"bc" + active + "\" id=\"card-" + b.id + "\" data-id=\"" + b.id + "\">" +
+          "<div class=\"bc-head\">" +
+            "<input class=\"bc-swatch\" type=\"color\" id=\"color-" + b.id + "\" value=\"" + b.color + "\">" +
+            "<span class=\"bc-label\">Blob " + (i + 1) + "</span>" +
+            "<button class=\"bc-icon-btn\" data-dup=\"" + b.id + "\" title=\"Duplicate\">⧉</button>" +
+            "<button class=\"bc-icon-btn danger\" data-del=\"" + b.id + "\" title=\"Delete\">✕</button>" +
+          "</div>" +
+          "<div class=\"bc-row\">" +
+            "<label class=\"field\"><span>X</span><input type=\"number\" step=\"1\" id=\"x-" + b.id + "\" value=\"" + round1(b.x) + "\"></label>" +
+            "<label class=\"field\"><span>Y</span><input type=\"number\" step=\"1\" id=\"y-" + b.id + "\" value=\"" + round1(b.y) + "\"></label>" +
+            "<label class=\"field\"><span>RX</span><input type=\"number\" step=\"0.5\" min=\"1\" id=\"rx-" + b.id + "\" value=\"" + round1(b.rx) + "\"></label>" +
+            "<label class=\"field\"><span>RY</span><input type=\"number\" step=\"0.5\" min=\"1\" id=\"ry-" + b.id + "\" value=\"" + round1(b.ry) + "\"></label>" +
+          "</div>" +
+          "<div class=\"bc-sliders\">" +
+            "<label class=\"field\"><span id=\"rotval-" + b.id + "\">" + Math.round(b.rot) + "°</span><input type=\"range\" min=\"-90\" max=\"90\" step=\"1\" id=\"rot-" + b.id + "\" value=\"" + b.rot + "\"></label>" +
+            "<label class=\"field\"><span id=\"opval-" + b.id + "\">" + Math.round(b.opacity * 100) + "%</span><input type=\"range\" min=\"0.2\" max=\"1\" step=\"0.02\" id=\"op-" + b.id + "\" value=\"" + b.opacity + "\"></label>" +
+          "</div>" +
+        "</div>"
+      );
+    }).join("");
+
+    blobs.forEach(function (b) {
+      bind("color-" + b.id, "input", function (e) { updateField(b.id, "color", e.target.value); });
+      bind("x-" + b.id, "input", function (e) { updateField(b.id, "x", Number(e.target.value) || 0); });
+      bind("y-" + b.id, "input", function (e) { updateField(b.id, "y", Number(e.target.value) || 0); });
+      bind("rx-" + b.id, "input", function (e) { updateField(b.id, "rx", Math.max(1, Number(e.target.value) || 1)); });
+      bind("ry-" + b.id, "input", function (e) { updateField(b.id, "ry", Math.max(1, Number(e.target.value) || 1)); });
+      bind("rot-" + b.id, "input", function (e) {
+        updateField(b.id, "rot", Number(e.target.value));
+        document.getElementById("rotval-" + b.id).textContent = Math.round(Number(e.target.value)) + "°";
+      });
+      bind("op-" + b.id, "input", function (e) {
+        updateField(b.id, "opacity", Number(e.target.value));
+        document.getElementById("opval-" + b.id).textContent = Math.round(Number(e.target.value) * 100) + "%";
+      });
+    });
+
+    blobList.querySelectorAll("[data-dup]").forEach(function (btn) {
+      btn.addEventListener("click", function () { duplicateBlob(Number(btn.getAttribute("data-dup"))); });
+    });
+    blobList.querySelectorAll("[data-del]").forEach(function (btn) {
+      btn.addEventListener("click", function () { deleteBlob(Number(btn.getAttribute("data-del"))); });
+    });
+    blobList.querySelectorAll(".bc").forEach(function (card) {
+      card.addEventListener("click", function (e) {
+        if (e.target.closest("input") || e.target.closest("button")) return;
+        selectBlob(Number(card.getAttribute("data-id")));
+      });
+    });
+  }
+
+  function bind(id, evt, fn) { const el = document.getElementById(id); if (el) el.addEventListener(evt, fn); }
+  function round1(n) { return Math.round(n * 10) / 10; }
+
+  function updateField(id, key, value) {
+    const b = findBlob(id);
+    if (!b) return;
+    b[key] = value;
+    const swatch = document.getElementById("card-" + id);
+    if (swatch) swatch.querySelector(".bc-swatch").style.setProperty("color", value);
+    renderCanvas();
+  }
+
+  function selectBlob(id) {
+    selectedId = id;
+    dragReadout.textContent = blobLabel(id);
+    document.querySelectorAll(".bc").forEach(function (c) { c.classList.toggle("active", Number(c.getAttribute("data-id")) === id); });
+    renderCanvas();
+  }
+
+  function blobLabel(id) {
+    const idx = blobs.findIndex(function (b) { return b.id === id; });
+    return idx === -1 ? "no blob selected" : "Blob " + (idx + 1);
+  }
+
+  function addBlob() {
+    const b = { id: nextId++, x: 96, y: 24, rx: 8, ry: 6, rot: 0, color: "#3f8a4c", opacity: 0.9 };
+    blobs.push(b);
+    selectedId = b.id;
+    buildBlobList();
+    renderCanvas();
+    const card = document.getElementById("card-" + b.id);
+    if (card) card.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }
+
+  function duplicateBlob(id) {
+    const b = findBlob(id);
+    if (!b) return;
+    const clone = Object.assign({}, b, { id: nextId++, x: b.x + 6, y: b.y + 4 });
+    const idx = blobs.findIndex(function (x) { return x.id === id; });
+    blobs.splice(idx + 1, 0, clone);
+    selectedId = clone.id;
+    buildBlobList();
+    renderCanvas();
+    const card = document.getElementById("card-" + clone.id);
+    if (card) card.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }
+
+  function deleteBlob(id) {
+    blobs = blobs.filter(function (b) { return b.id !== id; });
+    if (selectedId === id) { selectedId = null; dragReadout.textContent = "no blob selected"; }
+    buildBlobList();
+    renderCanvas();
+  }
+
+  function svgPoint(evt) {
+    const pt = svg.createSVGPoint();
+    pt.x = evt.clientX;
+    pt.y = evt.clientY;
+    return pt.matrixTransform(svg.getScreenCTM().inverse());
+  }
+
+  function onPointerDown(evt) {
+    const id = Number(evt.currentTarget.getAttribute("data-id"));
+    const b = findBlob(id);
+    if (!b) return;
+    selectBlob(id);
+    const p = svgPoint(evt);
+    dragging = { id: id, startX: p.x, startY: p.y, startBX: b.x, startBY: b.y };
+    svg.classList.add("dragging");
+    evt.currentTarget.setPointerCapture(evt.pointerId);
+    evt.preventDefault();
+  }
+
+  svg.addEventListener("pointermove", function (evt) {
+    if (!dragging) return;
+    const b = findBlob(dragging.id);
+    if (!b) return;
+    const p = svgPoint(evt);
+    b.x = dragging.startBX + (p.x - dragging.startX);
+    b.y = dragging.startBY + (p.y - dragging.startY);
+    dragReadout.textContent = blobLabel(b.id) + " · x " + Math.round(b.x) + ", y " + Math.round(b.y);
+    const xIn = document.getElementById("x-" + b.id);
+    const yIn = document.getElementById("y-" + b.id);
+    if (xIn) xIn.value = Math.round(b.x * 10) / 10;
+    if (yIn) yIn.value = Math.round(b.y * 10) / 10;
+    renderCanvas();
+  });
+
+  ["pointerup", "pointercancel", "pointerleave"].forEach(function (evtName) {
+    svg.addEventListener(evtName, function () { dragging = null; svg.classList.remove("dragging"); });
+  });
+
+  document.getElementById("addBlob").addEventListener("click", addBlob);
+
+  document.getElementById("resetAll").addEventListener("click", function () {
+    loadSeed();
+    selectedId = null;
+    dragReadout.textContent = "no blob selected";
+    buildBlobList();
+    renderCanvas();
+  });
+
+  function selectCodeOut() {
+    const node = document.getElementById("codeOut");
+    const range = document.createRange();
+    range.selectNodeContents(node);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+    return node;
+  }
+
+  function flashToast(msg) {
+    const toast = document.getElementById("copyToast");
+    toast.textContent = msg;
+    toast.classList.add("show");
+    setTimeout(function () { toast.classList.remove("show"); }, 1800);
+  }
+
+  function fallbackCopy(text) {
+    const node = selectCodeOut();
+    try {
+      const ok = document.execCommand("copy");
+      window.getSelection().removeAllRanges();
+      if (ok) { flashToast("Copied"); return; }
+    } catch (e) { /* fall through */ }
+    // Last resort: leave the text selected so Cmd/Ctrl+C works manually.
+    selectCodeOut();
+    flashToast("Press ⌘/Ctrl+C to copy — text is selected");
+  }
+
+  document.getElementById("copyBtn").addEventListener("click", function () {
+    const text = document.getElementById("codeOut").textContent;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function () {
+        flashToast("Copied");
+      }).catch(function () {
+        fallbackCopy(text);
+      });
+    } else {
+      fallbackCopy(text);
+    }
+  });
+
+  document.getElementById("codeOut").addEventListener("click", function () {
+    selectCodeOut();
+  });
+
+  function bindOceanField(id, key) {
+    const el = document.getElementById(id);
+    el.value = ocean[key];
+    el.addEventListener("input", function (e) {
+      ocean[key] = e.target.value;
+      applyOcean();
+      updateCode();
+    });
+  }
+  bindOceanField("oceanC1", "c1");
+  bindOceanField("oceanC2", "c2");
+  bindOceanField("oceanC3", "c3");
+
+  document.getElementById("oceanReset").addEventListener("click", function () {
+    ocean = Object.assign({}, DEFAULT_OCEAN);
+    document.getElementById("oceanC1").value = ocean.c1;
+    document.getElementById("oceanC2").value = ocean.c2;
+    document.getElementById("oceanC3").value = ocean.c3;
+    applyOcean();
+    updateCode();
+  });
+
+  function flashSaveStatus(msg, cls) {
+    const el = document.getElementById("saveStatus");
+    el.textContent = msg;
+    el.className = "save-status" + (cls ? " " + cls : "");
+  }
+
+  document.getElementById("saveBtn").addEventListener("click", function () {
+    const btn = document.getElementById("saveBtn");
+    btn.disabled = true;
+    flashSaveStatus("Saving…");
+    fetch("/tools/save-globe-css", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ css: fullCssBlock() })
+    })
+      .then(function (res) {
+        return res.json().then(function (data) { return { ok: res.ok, data: data }; });
+      })
+      .then(function (result) {
+        if (result.ok) {
+          flashSaveStatus("Saved to css/styles.css — reload the app to see it.", "ok");
+        } else {
+          flashSaveStatus("Save failed: " + (result.data && result.data.error ? result.data.error : "unknown error"), "err");
+        }
+      })
+      .catch(function () {
+        flashSaveStatus("Save failed: couldn't reach the app server. Open this editor via http://localhost:3000/tools/globe-editor.html (not as a local file) with `node server.js` running.", "err");
+      })
+      .finally(function () {
+        btn.disabled = false;
+      });
+  });
+
+  applyOcean();
+  buildBlobList();
+  renderCanvas();
+})();
+</script>

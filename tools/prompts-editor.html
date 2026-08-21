@@ -1,0 +1,481 @@
+<title>Example Prompts Editor</title>
+<style>
+  :root {
+    --bg: #eef1ee;
+    --panel: rgba(255, 255, 255, 0.85);
+    --panel-border: rgba(20, 30, 40, 0.1);
+    --ink: rgba(15, 23, 32, 0.92);
+    --ink-dim: rgba(15, 23, 32, 0.58);
+    --ink-faint: rgba(15, 23, 32, 0.36);
+    --accent: #ff6b00;
+    --accent-ink: #ffffff;
+    --input-bg: rgba(15, 23, 32, 0.04);
+    --row-bg: rgba(15, 23, 32, 0.02);
+    --row-bg-hover: rgba(15, 23, 32, 0.05);
+    --shadow: 0 1px 2px rgba(15, 23, 32, 0.06), 0 8px 24px rgba(15, 23, 32, 0.06);
+    --danger: #d94b4b;
+    --danger-bg: rgba(217, 75, 75, 0.1);
+    --ok: #2f9e5b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14171f;
+      --panel: rgba(50, 57, 82, 0.55);
+      --panel-border: rgba(255, 255, 255, 0.1);
+      --ink: rgba(255, 255, 255, 0.92);
+      --ink-dim: rgba(255, 255, 255, 0.6);
+      --ink-faint: rgba(255, 255, 255, 0.38);
+      --input-bg: rgba(255, 255, 255, 0.06);
+      --row-bg: rgba(255, 255, 255, 0.04);
+      --row-bg-hover: rgba(255, 255, 255, 0.08);
+      --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 12px 30px rgba(0, 0, 0, 0.35);
+      --danger-bg: rgba(217, 75, 75, 0.16);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #14171f;
+    --panel: rgba(50, 57, 82, 0.55);
+    --panel-border: rgba(255, 255, 255, 0.1);
+    --ink: rgba(255, 255, 255, 0.92);
+    --ink-dim: rgba(255, 255, 255, 0.6);
+    --ink-faint: rgba(255, 255, 255, 0.38);
+    --input-bg: rgba(255, 255, 255, 0.06);
+    --row-bg: rgba(255, 255, 255, 0.04);
+    --row-bg-hover: rgba(255, 255, 255, 0.08);
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 12px 30px rgba(0, 0, 0, 0.35);
+    --danger-bg: rgba(217, 75, 75, 0.16);
+  }
+  :root[data-theme="light"] {
+    --bg: #eef1ee;
+    --panel: rgba(255, 255, 255, 0.85);
+    --panel-border: rgba(20, 30, 40, 0.1);
+    --ink: rgba(15, 23, 32, 0.92);
+    --ink-dim: rgba(15, 23, 32, 0.58);
+    --ink-faint: rgba(15, 23, 32, 0.36);
+    --input-bg: rgba(15, 23, 32, 0.04);
+    --row-bg: rgba(15, 23, 32, 0.02);
+    --row-bg-hover: rgba(15, 23, 32, 0.05);
+    --shadow: 0 1px 2px rgba(15, 23, 32, 0.06), 0 8px 24px rgba(15, 23, 32, 0.06);
+    --danger-bg: rgba(217, 75, 75, 0.1);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    padding: 32px 24px 80px;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; }
+
+  header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 16px;
+    margin-bottom: 20px;
+  }
+  .eyebrow {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 6px;
+  }
+  h1 { font-size: 24px; font-weight: 700; margin: 0 0 6px; letter-spacing: -0.01em; }
+  .sub { font-size: 13.5px; color: var(--ink-dim); max-width: 60ch; line-height: 1.5; margin: 0; }
+
+  .save-col { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; flex-shrink: 0; }
+  .btn {
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 9px 16px;
+    border-radius: 8px;
+    border: 1px solid var(--panel-border);
+    background: var(--panel);
+    color: var(--ink);
+    cursor: pointer;
+  }
+  .btn:hover { background: var(--row-bg-hover); }
+  .btn-primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--accent-ink);
+  }
+  .btn-primary:hover { filter: brightness(1.06); }
+  .btn-primary:disabled { opacity: 0.5; cursor: default; filter: none; }
+  .status-line { font-size: 11.5px; color: var(--ink-faint); }
+  .status-line.ok { color: var(--ok); }
+  .status-line.err { color: var(--danger); }
+
+  .tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 16px;
+    border-bottom: 1px solid var(--panel-border);
+    padding-bottom: 12px;
+  }
+  .tab {
+    font-family: inherit;
+    font-size: 12.5px;
+    font-weight: 600;
+    padding: 7px 12px;
+    border-radius: 999px;
+    border: 1px solid var(--panel-border);
+    background: var(--panel);
+    color: var(--ink-dim);
+    cursor: pointer;
+  }
+  .tab .count {
+    font-weight: 400;
+    color: var(--ink-faint);
+    margin-left: 3px;
+  }
+  .tab.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--accent-ink);
+  }
+  .tab.active .count { color: rgba(255,255,255,0.8); }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 14px;
+    box-shadow: var(--shadow);
+    padding: 18px 20px;
+  }
+  .panel h2 { font-size: 14px; font-weight: 700; margin: 0 0 3px; }
+  .panel .hint { font-size: 12px; color: var(--ink-faint); margin: 0 0 14px; line-height: 1.5; }
+
+  .toolrow { display: flex; gap: 8px; margin-bottom: 14px; }
+  .toolrow input[type="text"], .toolrow input[type="search"] {
+    flex: 1;
+    font-family: inherit;
+    font-size: 13.5px;
+    padding: 9px 12px;
+    border-radius: 8px;
+    border: 1px solid var(--panel-border);
+    background: var(--input-bg);
+    color: var(--ink);
+  }
+  .toolrow input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+
+  .list { display: flex; flex-direction: column; gap: 6px; max-height: 560px; overflow-y: auto; }
+  .row {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    background: var(--row-bg);
+    border-radius: 8px;
+    padding: 6px 6px 6px 12px;
+  }
+  .row:hover { background: var(--row-bg-hover); }
+  .row-text {
+    flex: 1;
+    font-size: 13.5px;
+    line-height: 1.5;
+    padding: 6px 4px;
+    min-height: 1em;
+    outline: none;
+    word-break: break-word;
+  }
+  .row-text:focus { color: var(--ink); }
+  .row-text.placeholder-empty:empty::before { content: "(empty)"; color: var(--danger); }
+  .row-del {
+    flex-shrink: 0;
+    width: 26px;
+    height: 26px;
+    border-radius: 6px;
+    border: none;
+    background: transparent;
+    color: var(--ink-faint);
+    font-size: 15px;
+    cursor: pointer;
+    line-height: 1;
+  }
+  .row-del:hover { background: var(--danger-bg); color: var(--danger); }
+  .row-fav {
+    flex-shrink: 0;
+    width: 26px;
+    height: 26px;
+    border-radius: 6px;
+    border: none;
+    background: transparent;
+    color: var(--ink-faint);
+    font-size: 15px;
+    cursor: pointer;
+    line-height: 1;
+  }
+  .row-fav:hover { background: var(--row-bg-hover); color: var(--ink-dim); }
+  .row-fav.is-fav { color: var(--accent); }
+  .row.is-fav { background: rgba(255, 107, 0, 0.07); }
+
+  .toolrow.checkrow { align-items: center; gap: 6px; margin-top: -6px; }
+  .checkrow label { font-size: 12px; color: var(--ink-dim); display: flex; align-items: center; gap: 6px; cursor: pointer; }
+  .checkrow input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
+
+  .empty-msg { font-size: 13px; color: var(--ink-faint); padding: 20px 4px; text-align: center; }
+
+  .loading { font-size: 13px; color: var(--ink-faint); padding: 40px 0; text-align: center; }
+</style>
+
+<div class="wrap">
+  <header>
+    <div>
+      <p class="eyebrow">Earthlopedia · Dev Tool</p>
+      <h1>Example Prompts Editor</h1>
+      <p class="sub">
+        Manage the landing-page suggestion chips and the prompt-builder topic pools.
+        Star a prompt in the Example Prompts tab to pin it as a preferred landing chip.
+        Edits are saved straight into <code>js/main.js</code> between the
+        <code>PROMPTS:START</code>/<code>PROMPTS:END</code> markers — reload the app after saving to see them live.
+      </p>
+    </div>
+    <div class="save-col">
+      <button class="btn btn-primary" id="saveBtn" disabled>Save to main.js</button>
+      <span class="status-line" id="statusLine">No changes</span>
+    </div>
+  </header>
+
+  <div class="tabs" id="tabs"></div>
+
+  <div class="panel">
+    <h2 id="panelTitle"></h2>
+    <p class="hint" id="panelHint"></p>
+    <div class="toolrow">
+      <input type="text" id="addInput" placeholder="Type a new prompt and press Enter…">
+      <button class="btn" id="addBtn">Add</button>
+    </div>
+    <div class="toolrow">
+      <input type="search" id="filterInput" placeholder="Filter this list…">
+    </div>
+    <div class="toolrow checkrow" id="favOnlyRow" style="display: none;">
+      <label><input type="checkbox" id="favOnlyCheck"> Show favorites only (<span id="favCount">0</span>)</label>
+    </div>
+    <div class="list" id="list"></div>
+  </div>
+</div>
+
+<script>
+const TABS = [
+  { key: "RANDOM_QUESTIONS", label: "Example Prompts", hint: "Shown as the landing-page suggestion chips. Starred (favorited) prompts are shown first; the rest fill in randomly." },
+  { key: "route", label: "Route topics", hint: "Fills the blank in “Map the route of ___” in the prompt builder." },
+  { key: "timeline", label: "Timeline topics", hint: "Fills the blank in “Timeline of ___” in the prompt builder." },
+  { key: "battle", label: "Battle topics", hint: "Fills the blank in “Show every battle of ___” in the prompt builder." },
+  { key: "spread", label: "Spread topics", hint: "Fills the blank in “Where did ___ spread?” in the prompt builder." },
+  { key: "geography", label: "Geography topics", hint: "Fills the blank in “Trace the geography of ___” in the prompt builder." },
+  { key: "COMPARE_A", label: "Compare A", hint: "First side of the pair in “Compare the empires of ___ and ___”." },
+  { key: "COMPARE_B", label: "Compare B", hint: "Second side of the pair (a different random item is guaranteed)." },
+];
+
+let data = null; // { RANDOM_QUESTIONS, POOL: {route,timeline,battle,spread,geography}, COMPARE_A, COMPARE_B }
+let dirty = false;
+let activeTab = TABS[0].key;
+let filterText = "";
+let favoriteSet = new Set();
+let favOnly = false;
+
+function listFor(key) {
+  if (key === "RANDOM_QUESTIONS") return data.RANDOM_QUESTIONS;
+  if (key === "COMPARE_A") return data.COMPARE_A;
+  if (key === "COMPARE_B") return data.COMPARE_B;
+  return data.POOL[key];
+}
+
+function setDirty(v) {
+  dirty = v;
+  document.getElementById("saveBtn").disabled = !v;
+  const s = document.getElementById("statusLine");
+  if (v) { s.textContent = "Unsaved changes"; s.className = "status-line"; }
+}
+
+function renderTabs() {
+  const el = document.getElementById("tabs");
+  el.innerHTML = TABS.map(t => {
+    const n = listFor(t.key).length;
+    return `<button class="tab ${t.key === activeTab ? "active" : ""}" data-key="${t.key}">${t.label}<span class="count">${n}</span></button>`;
+  }).join("");
+  el.querySelectorAll(".tab").forEach(btn => {
+    btn.addEventListener("click", () => {
+      activeTab = btn.dataset.key;
+      filterText = "";
+      document.getElementById("filterInput").value = "";
+      renderTabs();
+      renderPanel();
+    });
+  });
+}
+
+function renderPanel() {
+  const t = TABS.find(t => t.key === activeTab);
+  const isPrompts = activeTab === "RANDOM_QUESTIONS";
+  document.getElementById("panelTitle").textContent = t.label;
+  document.getElementById("panelHint").textContent = t.hint;
+  document.getElementById("addInput").placeholder =
+    isPrompts ? "Type a new example prompt and press Enter…" : "Type a new topic and press Enter…";
+  document.getElementById("favOnlyRow").style.display = isPrompts ? "" : "none";
+  document.getElementById("favCount").textContent = favoriteSet.size;
+  renderList();
+}
+
+function renderList() {
+  const list = listFor(activeTab);
+  const isPrompts = activeTab === "RANDOM_QUESTIONS";
+  const el = document.getElementById("list");
+  const q = filterText.trim().toLowerCase();
+  const indices = list.map((_, i) => i).filter(i =>
+    (!q || list[i].toLowerCase().includes(q)) && (!isPrompts || !favOnly || favoriteSet.has(list[i]))
+  );
+
+  if (indices.length === 0) {
+    el.innerHTML = `<div class="empty-msg">${list.length === 0 ? "Nothing here yet — add one above." : "No matches."}</div>`;
+    return;
+  }
+
+  el.innerHTML = indices.map(i => {
+    const isFav = isPrompts && favoriteSet.has(list[i]);
+    const favBtn = isPrompts
+      ? `<button class="row-fav ${isFav ? "is-fav" : ""}" title="${isFav ? "Unfavorite" : "Favorite"}">${isFav ? "★" : "☆"}</button>`
+      : "";
+    return `
+    <div class="row ${isFav ? "is-fav" : ""}" data-i="${i}">
+      ${favBtn}
+      <div class="row-text" contenteditable="true" spellcheck="false">${escapeHtml(list[i])}</div>
+      <button class="row-del" title="Delete">✕</button>
+    </div>
+  `;
+  }).join("");
+
+  el.querySelectorAll(".row").forEach(row => {
+    const i = Number(row.dataset.i);
+    const textEl = row.querySelector(".row-text");
+    const delBtn = row.querySelector(".row-del");
+    const favBtn = row.querySelector(".row-fav");
+
+    textEl.addEventListener("blur", () => {
+      const val = textEl.textContent.trim();
+      const arr = listFor(activeTab);
+      if (val === "") {
+        if (isPrompts) favoriteSet.delete(arr[i]);
+        arr.splice(i, 1);
+        setDirty(true);
+        renderTabs();
+        renderPanel();
+        return;
+      }
+      if (val !== arr[i]) {
+        if (isPrompts && favoriteSet.has(arr[i])) {
+          favoriteSet.delete(arr[i]);
+          favoriteSet.add(val);
+        }
+        arr[i] = val;
+        setDirty(true);
+      }
+    });
+    textEl.addEventListener("keydown", e => {
+      if (e.key === "Enter") { e.preventDefault(); textEl.blur(); }
+    });
+
+    delBtn.addEventListener("click", () => {
+      const arr = listFor(activeTab);
+      if (isPrompts) favoriteSet.delete(arr[i]);
+      arr.splice(i, 1);
+      setDirty(true);
+      renderTabs();
+      renderPanel();
+    });
+
+    if (favBtn) {
+      favBtn.addEventListener("click", () => {
+        const text = listFor(activeTab)[i];
+        if (favoriteSet.has(text)) favoriteSet.delete(text);
+        else favoriteSet.add(text);
+        setDirty(true);
+        renderPanel();
+      });
+    }
+  });
+}
+
+function escapeHtml(s) {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function addCurrent() {
+  const input = document.getElementById("addInput");
+  const val = input.value.trim();
+  if (!val) return;
+  listFor(activeTab).push(val);
+  input.value = "";
+  setDirty(true);
+  renderTabs();
+  renderList();
+}
+
+document.getElementById("addBtn").addEventListener("click", addCurrent);
+document.getElementById("addInput").addEventListener("keydown", e => {
+  if (e.key === "Enter") { e.preventDefault(); addCurrent(); }
+});
+document.getElementById("filterInput").addEventListener("input", e => {
+  filterText = e.target.value;
+  renderList();
+});
+document.getElementById("favOnlyCheck").addEventListener("change", e => {
+  favOnly = e.target.checked;
+  renderList();
+});
+
+document.getElementById("saveBtn").addEventListener("click", async () => {
+  const btn = document.getElementById("saveBtn");
+  const status = document.getElementById("statusLine");
+  btn.disabled = true;
+  status.textContent = "Saving…";
+  status.className = "status-line";
+  try {
+    const res = await fetch("/tools/save-prompts-js", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        RANDOM_QUESTIONS: data.RANDOM_QUESTIONS,
+        FAVORITE_QUESTIONS: data.RANDOM_QUESTIONS.filter(q => favoriteSet.has(q)),
+        POOL: data.POOL,
+        COMPARE_A: data.COMPARE_A,
+        COMPARE_B: data.COMPARE_B,
+      }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || `HTTP ${res.status}`);
+    }
+    setDirty(false);
+    status.textContent = "Saved ✓";
+    status.className = "status-line ok";
+  } catch (err) {
+    status.textContent = "Save failed: " + err.message;
+    status.className = "status-line err";
+    btn.disabled = false;
+  }
+});
+
+async function load() {
+  const el = document.getElementById("list");
+  el.innerHTML = `<div class="loading">Loading current prompts from js/main.js…</div>`;
+  try {
+    const res = await fetch("/tools/load-prompts-js");
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    data = await res.json();
+    favoriteSet = new Set(data.FAVORITE_QUESTIONS || []);
+    renderTabs();
+    renderPanel();
+  } catch (err) {
+    el.innerHTML = `<div class="empty-msg">Failed to load: ${err.message}.<br>Make sure the dev server (npm start, not production) is running.</div>`;
+  }
+}
+
+load();
+</script>
