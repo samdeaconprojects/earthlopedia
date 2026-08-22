@@ -1489,7 +1489,11 @@ function timelineRecenter(instant = false) {
         renderTimeline();
         return;
     }
-    if (Math.abs(timelineCenterYear - targetYear) < 0.001) return;
+    // The arc itself doesn't need to move, but the newly-focused event still
+    // needs its emphasis ring repainted onto it — without this, two locations
+    // sharing (near-enough) the same year leave the ring stuck on whichever
+    // node was centered last, even though currentFocusedIndex has moved on.
+    if (Math.abs(timelineCenterYear - targetYear) < 0.001) { renderTimeline(); return; }
 
     // setTimeout rather than requestAnimationFrame so the arc still settles
     // into place if the tab is backgrounded mid-transition.
