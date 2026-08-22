@@ -534,9 +534,18 @@ body.containers-hidden #timeline-fade,
 body.containers-hidden #currentImagePanel,
 body.containers-hidden #marker-popout,
 body.containers-hidden #backButton,
-body.containers-hidden #cancelSearchBtn,
-body.containers-hidden #resetLayoutBtn {
+body.containers-hidden #cancelSearchBtn {
     display: none !important;
+}
+/* #resetLayoutBtn stays out of that shared display:none — it's a flex
+   sibling of #topSearchClearBtn (the "hide overlays" button itself) inside
+   #topSearchActions, and that group is right-anchored. Removing it from the
+   flex row entirely shrinks the row and shifts the clear button to fill the
+   gap; hiding it visually instead keeps its space reserved so the clear
+   button doesn't jump. */
+body.containers-hidden #resetLayoutBtn {
+    visibility: hidden;
+    pointer-events: none;
 }
 
 /* ============== DRAGGABLE PANELS ============== */
@@ -713,10 +722,12 @@ body.theme-light .answer-hero p {
 #currentImagePanel {
     position: fixed;
     z-index: 150;
-    top: 72px;
-    right: 16px;
+    /* Aligned with #questionBox and #summaryTitleBar's shared top (78px) so
+       all three header-cluster containers start on the same line. */
+    top: 78px;
+    right: 24px;
     width: 320px;
-    max-height: calc(100vh - 90px);
+    max-height: calc(100vh - 96px);
     overflow-y: auto;
     padding: 10px;
     border-radius: 16px;
@@ -808,13 +819,13 @@ body.theme-light .answer-hero p {
 #questionBox {
     position: fixed;
     z-index: 100;
-    /* Pinned to the left, tucked up close under the search pill/title bar
-       rather than trailing far below them, so the summary reads as part of
-       the same header cluster instead of a separate lower panel. */
-    top: 96px;
-    left: 16px;
+    /* Pinned to the left, aligned with #currentImagePanel and
+       #summaryTitleBar's shared top (78px) so all three header-cluster
+       containers start on the same line instead of trailing below them. */
+    top: 78px;
+    left: 24px;
     width: 320px;
-    max-height: calc(100vh - 116px);
+    max-height: calc(100vh - 98px);
     overflow-y: auto;
     padding: 16px;
     border-radius: 20px;
@@ -1740,9 +1751,14 @@ body:has(#questionBox.loc-focused) .loc-header-block { display: block; }
     line-height: 1.65;
     color: var(--answer-text);
 }
-.loc-focus-summary strong {
+/* #answer prefix matches the specificity of "#answer strong" below (which
+   would otherwise win over a bare class selector and force plain white/black
+   text) so this rule actually applies. */
+#answer .loc-focus-summary strong {
     font-weight: 700;
-    color: var(--accent-light);
+    /* --loc-accent is set per-location (in JS) to match that location's own
+       marker color on the map; falls back to the flat accent if unset. */
+    color: var(--loc-accent, var(--accent-light));
 }
 .loc-focus-wiki {
     font-size: 11px;

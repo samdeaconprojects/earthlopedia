@@ -2951,6 +2951,11 @@ function focusLocation(location, index) {
                </div>`
             : '';
         summarySlot.innerHTML = `<div class="loc-focus-summary">${marked.parse(summary)}${linkHTML}</div>${fuHTML}`;
+        // Color this location's bold names/dates to match its own marker
+        // color on the map (route/compare/time color) rather than the flat
+        // accent, so the summary reads as "belonging" to that pin/dot.
+        const locColor = activeLocationColors[index];
+        if (locColor) summarySlot.style.setProperty('--loc-accent', readableTextColor(locColor));
 
         if (followUps && followUps.length) {
             summarySlot.querySelectorAll('.loc-followup-q').forEach(btn => {
@@ -3154,8 +3159,14 @@ function updateTimelineNav() {
 function prevLocation() {
     const order = timelineOrderedIndices();
     if (!order.length) return;
-    const cur = currentFocusedIndex ?? order[0];
-    const pos = order.indexOf(cur);
+    if (currentFocusedIndex === null) {
+        // At the topic overview (home) — arrowing left wraps around to the
+        // last location, mirroring how the last location wraps forward to home.
+        const idx = order[order.length - 1];
+        focusLocation(activeLocations[idx - 1], idx);
+        return;
+    }
+    const pos = order.indexOf(currentFocusedIndex);
     if (pos <= 0) return;
     const idx = order[pos - 1];
     focusLocation(activeLocations[idx - 1], idx);
@@ -3166,7 +3177,12 @@ function nextLocation() {
     if (!order.length) return;
     const cur = currentFocusedIndex ?? order[0];
     const pos = order.indexOf(cur);
-    if (pos === -1 || pos >= order.length - 1) return;
+    if (pos === -1 || pos >= order.length - 1) {
+        // Arrowing past the last location loops back to the topic overview
+        // (home) instead of getting stuck at the end.
+        returnToOverview();
+        return;
+    }
     const idx = order[pos + 1];
     focusLocation(activeLocations[idx - 1], idx);
 }
@@ -3581,6 +3597,62 @@ function routeColor(paletteIndex, t) {
     return `rgb(${r},${g},${b})`;
 }
 
+// Marker/route colors range down into quite dark, saturated tones — fine for
+// a pin (white number + drop shadow keep it legible) but too low-contrast
+// for body text on the dark summary panel. Floors the HSL lightness before
+// using one of these colors for text, without touching the hue/saturation
+// that ties it back to the marker.
+function readableTextColor(colorString, minLightness = 60) {
+    const rgbMatch = colorString.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
+    const hexMatch = !rgbMatch && colorString.match(/^#([0-9a-f]{6})$/i);
+    let rVal, gVal, bVal;
+    if (rgbMatch) {
+        [rVal, gVal, bVal] = [rgbMatch[1], rgbMatch[2], rgbMatch[3]].map(Number);
+    } else if (hexMatch) {
+        const hex = hexMatch[1];
+        rVal = parseInt(hex.slice(0, 2), 16);
+        gVal = parseInt(hex.slice(2, 4), 16);
+        bVal = parseInt(hex.slice(4, 6), 16);
+    } else {
+        return colorString;
+    }
+    let [r, g, b] = [rVal, gVal, bVal].map(v => v / 255);
+    const max = Math.max(r, g, b), min = Math.min(r, g, b);
+    let h, s, l = (max + min) / 2;
+    if (max === min) {
+        h = s = 0;
+    } else {
+        const d = max - min;
+        s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+        switch (max) {
+            case r: h = (g - b) / d + (g < b ? 6 : 0); break;
+            case g: h = (b - r) / d + 2; break;
+            default: h = (r - g) / d + 4;
+        }
+        h /= 6;
+    }
+    l = Math.max(l, minLightness / 100);
+    const hue2rgb = (p, q, t) => {
+        if (t < 0) t += 1;
+        if (t > 1) t -= 1;
+        if (t < 1 / 6) return p + (q - p) * 6 * t;
+        if (t < 1 / 2) return q;
+        if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+        return p;
+    };
+    let r2, g2, b2;
+    if (s === 0) {
+        r2 = g2 = b2 = l;
+    } else {
+        const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+        const p = 2 * l - q;
+        r2 = hue2rgb(p, q, h + 1 / 3);
+        g2 = hue2rgb(p, q, h);
+        b2 = hue2rgb(p, q, h - 1 / 3);
+    }
+    return `rgb(${Math.round(r2 * 255)},${Math.round(g2 * 255)},${Math.round(b2 * 255)})`;
+}
+
 // Returns Map(routeId -> paletteIndex) only when 2+ distinct routes are present, else null
 function getRouteGroups(locations) {
     const ids = [...new Set(locations.map(l => l.route).filter(r => r !== null && r !== undefined))];
@@ -3735,12 +3807,12 @@ function hideCompareLegend() {
     if (legend) legend.style.display = 'none';
 }
 
-function renderMarkers(locations, periods = []) {
-    const bounds = new google.maps.LatLngBounds();
-    const infowindow = new google.maps.InfoWindow();
-    const locationsContainer = document.querySelector(".collapsible-content");
-    locationsContainer.innerHTML = "";
-
+// Computes the same per-location marker color used on the map/list (route
+// color, compare A/B color, or time-based color) for every location, keyed
+// by its 1-based marker index. Shared by renderMarkers (for the dots/pins)
+// and focusLocation (to color that location's own bold summary text to
+// match), so the two never drift apart.
+function computeLocationColors(locations) {
     const withYearsList = locations.filter(l => l.year !== null && l.year !== undefined);
     const minYear = withYearsList.length ? Math.min(...withYearsList.map(l => l.year)) : null;
     const maxYear = withYearsList.length ? Math.max(...withYearsList.map(l => l.year)) : null;
@@ -3755,13 +3827,9 @@ function renderMarkers(locations, periods = []) {
         });
     }
 
+    const colors = {};
     locations.forEach((location, index) => {
-        const locationDiv = document.createElement("div");
-        locationDiv.classList.add("location-item");
-        const yearLabel = location.year !== null ? `<span class="location-year">${location.year < 0 ? Math.abs(location.year) + ' BCE' : location.year}</span>` : '';
-
         const n = index + 1;
-        const isMain = location.main === true;
         let color;
         if (routeGroups && location.route !== null && routeGroups.has(location.route)) {
             const paletteIndex = routeGroups.get(location.route);
@@ -3778,6 +3846,31 @@ function renderMarkers(locations, periods = []) {
         } else {
             color = useTimeColor ? yearToColor(location.year, minYear, maxYear) : '#6366f1';
         }
+        colors[n] = color;
+    });
+    return colors;
+}
+
+// Populated by renderMarkers, read by focusLocation — see computeLocationColors.
+let activeLocationColors = {};
+
+function renderMarkers(locations, periods = []) {
+    const bounds = new google.maps.LatLngBounds();
+    const infowindow = new google.maps.InfoWindow();
+    const locationsContainer = document.querySelector(".collapsible-content");
+    locationsContainer.innerHTML = "";
+
+    activeLocationColors = computeLocationColors(locations);
+    const routeGroups = getRouteGroups(locations);
+
+    locations.forEach((location, index) => {
+        const locationDiv = document.createElement("div");
+        locationDiv.classList.add("location-item");
+        const yearLabel = location.year !== null ? `<span class="location-year">${location.year < 0 ? Math.abs(location.year) + ' BCE' : location.year}</span>` : '';
+
+        const n = index + 1;
+        const isMain = location.main === true;
+        const color = activeLocationColors[n];
         const routeDot = (routeGroups && location.route !== null && routeGroups.has(location.route))
             ? `<span class="location-route-dot" style="background:${color}"></span>` : '';
 
@@ -4163,9 +4256,19 @@ function toggleMapStyle() {
     // Drops any manual override so the panel's current CSS class (i.e. its
     // current mode) drives its position and size again.
     function clearOverride(panel) {
+        // maxHeight on #questionBox isn't only touched by the resize handle —
+        // renderTimeline()/askQuestion() also set it inline, independently of
+        // this drag system, to shrink the panel out of the timeline's way.
+        // Wiping it unconditionally here would undo that legitimate override
+        // (snapping the panel back to its full CSS max-height and covering
+        // the timeline) even when the panel was never actually drag-resized,
+        // so only clear it when a manual resize is what set it.
+        const wasResized = !!panel.dataset.resized;
         panel.classList.remove('panel-repositioned', 'panel-resized');
         delete panel.dataset.resized;
-        ['left', 'top', 'right', 'bottom', 'transform', 'margin', 'width', 'height', 'maxHeight', 'zIndex'].forEach((prop) => {
+        const props = ['left', 'top', 'right', 'bottom', 'transform', 'margin', 'width', 'height', 'zIndex'];
+        if (wasResized) props.push('maxHeight');
+        props.forEach((prop) => {
             panel.style[prop] = '';
         });
     }
