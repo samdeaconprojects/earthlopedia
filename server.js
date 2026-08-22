@@ -99,7 +99,7 @@ After the summary, output all locations in chronological order. Each entry name 
 
 ALWAYS produce the data block. For "world cup winners" → each tournament's host city final venue. For "dinosaurs" → major fossil sites. For "internet" → cities of key milestones. Always find the geographic angle.
 
-If the question is about a specific place, landmark, or singular subject (e.g. "the island that legally belongs to no country", "the lost city of Petra", "Taj Mahal"), add "main": true to that subject's entry. Only one entry should have "main": true. Do NOT add "main": true for survey/list questions (e.g. "World Cup winners", "major volcanoes").
+If the question is about a specific place, landmark, or singular subject (e.g. "the island that legally belongs to no country", "the lost city of Petra", "Taj Mahal"), add "main": true to that subject's entry. Only one entry should have "main": true. Do NOT add "main": true for survey/list questions (e.g. "World Cup winners", "major volcanoes"). The one exception is a two-subject COMPARISON query (see below), where exactly two entries have "main": true, one per subject.
 
 ## Direct vs. journey queries — this changes how many locations you output:
 First judge the query itself. A DIRECT query names one specific place, landmark, building, or singular subject and is really asking "tell me about this place" (e.g. "Taj Mahal", "Eiffel Tower", "the Great Barrier Reef", "Area 51"). A JOURNEY/STORY query asks about something that inherently moves or spans many places over time (a war, a migration, an invention's spread, a species' range, a sport's history, an empire).
@@ -111,6 +111,14 @@ First judge the query itself. A DIRECT query names one specific place, landmark,
 If the subject with "main": true is a country, sovereign state, overseas territory, or named political region (e.g. "France", "Japan", "Greenland", "Patagonia"), also add "country": "<English name suitable for geocoding>" to that same entry. Do not add "country" for cities, landmarks, or non-political geographic features.
 
 If the subject with "main": true is a historical empire, kingdom, or multi-country political entity (e.g. "the Roman Empire", "the British Empire", "the Mongol Empire"), instead add "region_countries": ["Country1", "Country2", ...] listing up to 8 modern countries whose territory significantly overlapped with that entity at its peak. Use standard English country names suitable for geocoding. Do not add both "country" and "region_countries" to the same entry.
+
+## Comparison queries:
+When the query explicitly asks to compare two named subjects (e.g. "Compare the empires of Rome and Han China", "Aztecs vs Incas", "the Ottoman and Byzantine empires"), treat it as a comparison rather than a single journey:
+- Pick one representative anchor location for EACH subject and tag both "main": true (an exception to the "only one main" rule above).
+- Add "compare_group": "A" to the first subject's main entry and every other location that belongs to the first subject, and "compare_group": "B" to the second subject's main entry and its locations. Every location in the data block should carry a compare_group.
+- Independently give each subject's main entry its own "country" or "region_countries" exactly as described above — one subject might get "country" while the other gets "region_countries", or both might get the same kind.
+- Aim for roughly balanced coverage — a similar number of locations for each subject — so neither side dominates the map.
+- Do NOT add "compare_group" for non-comparison queries, even ones that happen to mention two places in passing.
 
 ## Multiple routes:
 Most topics describe a single path and need nothing extra. But when a topic genuinely contains two or more distinct, separately-traceable journeys — e.g. "Columbus's four voyages", "Cook's three Pacific voyages", separate invasion routes of the same campaign, parallel migration branches — add "route": <integer> (1, 2, 3, ...) to each location marking which journey it belongs to. Use the same route number for every stop on the same journey, in chronological order within that route. Only do this when the routes are genuinely distinct and each has 2+ of its own stops; do not fragment a single continuous journey into artificial routes, and omit "route" entirely for single-path topics (the default case).
@@ -133,6 +141,16 @@ data:
   {"name": "San Salvador — first landfall, 1st voyage", "latitude": 24.0, "longitude": -74.5, "year": 1492, "route": 1},
   {"name": "Cádiz — departure, 2nd voyage", "latitude": 36.5, "longitude": -6.3, "year": 1493, "route": 2},
   {"name": "Hispaniola — colonization, 2nd voyage", "latitude": 19.0, "longitude": -70.7, "year": 1493, "route": 2}
+]
+
+Example with a two-subject comparison (only use "compare_group" like this for an explicit "compare X and Y" query):
+
+data:
+[
+  {"name": "Rome — founding of the Republic", "latitude": 41.9, "longitude": 12.5, "year": -509, "main": true, "region_countries": ["Italy", "Spain", "France", "Greece", "Egypt", "Turkey", "Tunisia", "United Kingdom"], "compare_group": "A"},
+  {"name": "Carthage — destroyed after the Third Punic War", "latitude": 36.85, "longitude": 10.32, "year": -146, "compare_group": "A"},
+  {"name": "Chang'an — Han capital", "latitude": 34.27, "longitude": 108.9, "year": -202, "main": true, "country": "China", "compare_group": "B"},
+  {"name": "Ferghana Valley — source of the 'heavenly horses'", "latitude": 40.4, "longitude": 71.8, "year": -104, "compare_group": "B"}
 ]
 
 Rules:
@@ -424,6 +442,81 @@ ${quoteList(COMPARE_B, '    ')}
         } catch (error) {
             console.error('Error in /tools/save-prompts-js:', error.message);
             res.status(500).json({ error: 'Failed to write js/main.js' });
+        }
+    });
+}
+
+// Dev-only: lets tools/prompts-editor.html manage draft "custom lists" of
+// candidate prompts — separate from the live js/main.js data — plus an AI
+// generator for filling a list with candidates for a given description.
+if (process.env.NODE_ENV !== 'production') {
+    const customListsPath = path.join(__dirname, 'tools', 'custom-prompt-lists.json');
+
+    function readCustomLists() {
+        try {
+            const raw = fs.readFileSync(customListsPath, 'utf8');
+            const parsed = JSON.parse(raw);
+            return Array.isArray(parsed.lists) ? parsed : { lists: [] };
+        } catch {
+            return { lists: [] };
+        }
+    }
+
+    app.get('/tools/load-custom-lists', (req, res) => {
+        res.json(readCustomLists());
+    });
+
+    app.post('/tools/save-custom-lists', (req, res) => {
+        try {
+            const { lists } = req.body || {};
+            if (!Array.isArray(lists)) {
+                return res.status(400).json({ error: 'Missing or invalid lists array' });
+            }
+            for (const l of lists) {
+                if (typeof l.id !== 'string' || typeof l.name !== 'string' ||
+                    !Array.isArray(l.prompts) || !l.prompts.every(p => typeof p === 'string')) {
+                    return res.status(400).json({ error: 'Malformed list entry' });
+                }
+            }
+            fs.writeFileSync(customListsPath, JSON.stringify({ lists }, null, 2), 'utf8');
+            res.json({ ok: true });
+        } catch (error) {
+            console.error('Error in /tools/save-custom-lists:', error.message);
+            res.status(500).json({ error: 'Failed to write custom-prompt-lists.json' });
+        }
+    });
+
+    app.post('/tools/generate-prompts', async (req, res) => {
+        try {
+            const { description, count, existing } = req.body || {};
+            if (!description || typeof description !== 'string') {
+                return res.status(400).json({ error: 'Missing description' });
+            }
+            const n = Math.min(Math.max(parseInt(count, 10) || 5, 1), 15);
+            const avoidList = Array.isArray(existing) ? existing.slice(0, 200) : [];
+            const avoidBlock = avoidList.length
+                ? `\n\nDo not repeat or closely rephrase any of these already-used prompts:\n${avoidList.map(q => `- ${q}`).join('\n')}`
+                : '';
+
+            const response = await anthropic.messages.create({
+                model: 'claude-haiku-4-5-20251001',
+                max_tokens: 1000,
+                temperature: 1,
+                messages: [{
+                    role: 'user',
+                    content: `You are writing example prompts for a history/geography exploration app called Earthlopedia. Each prompt is a short, punchy, specific question or command about a real historical journey, empire, battle, migration, place, or geographic phenomenon — written to make someone curious enough to click it. Examples of the house style:\n- "Trace every stop on Marco Polo's 24-year journey from Venice to Beijing"\n- "Map exactly where the Black Death spread year by year from 1347 to 1353"\n- "Why does Africa have so many suspiciously straight borders?"\n- "How Polynesian sailors navigated by stars and waves to find every Pacific island"\n\nWrite ${n} new prompts matching that style, all specifically about: "${description}"${avoidBlock}\n\nReply with ONLY a JSON array of ${n} strings, nothing else — no preamble, no markdown fences.`
+                }],
+            });
+
+            const raw = response.content[0].text.trim();
+            const start = raw.indexOf('[');
+            const end = raw.lastIndexOf(']');
+            if (start === -1 || end === -1) throw new Error('No JSON array in response');
+            const prompts = JSON.parse(raw.slice(start, end + 1)).filter(p => typeof p === 'string' && p.trim());
+            res.json({ prompts });
+        } catch (error) {
+            console.error('Error in /tools/generate-prompts:', error.message);
+            res.status(500).json({ error: 'Failed to generate prompts' });
         }
     });
 }

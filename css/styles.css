@@ -75,9 +75,6 @@ body.theme-light #stream-ghost {
     --mp-name: rgba(255, 255, 255, 0.92);
     --mp-event: rgba(255, 255, 255, 0.52);
     --mp-extract: rgba(255, 255, 255, 0.62);
-    --tooltip-bg: rgba(15, 17, 28, 0.96);
-    --tooltip-name: rgba(255, 255, 255, 0.92);
-    --tooltip-event: rgba(255, 255, 255, 0.55);
     --top-search-bg: rgba(50, 57, 82, 0.78);
     --top-search-query: rgba(255, 255, 255, 0.88);
     --top-search-border: rgba(255, 255, 255, 0.14);
@@ -150,9 +147,6 @@ body.theme-light {
     --mp-name: rgba(0, 0, 0, 0.88);
     --mp-event: rgba(0, 0, 0, 0.5);
     --mp-extract: rgba(0, 0, 0, 0.62);
-    --tooltip-bg: rgba(255, 255, 255, 0.55);
-    --tooltip-name: rgba(0, 0, 0, 0.88);
-    --tooltip-event: rgba(0, 0, 0, 0.55);
     --top-search-bg: rgba(255, 255, 255, 0.42);
     --top-search-query: rgba(0, 0, 0, 0.82);
     --top-search-border: rgba(255, 255, 255, 0.75);
@@ -397,11 +391,28 @@ body {
 }
 
 /* Clear/reset-layout toggles — pulled out of the centered search group so
-   they don't skew it off-center; they just hang in the top-right corner. */
+   they don't skew it off-center; they sit inset from the top-right corner,
+   about halfway between the edge and the centered pill, rather than hugging
+   the edge itself. */
 #topSearchActions {
     position: fixed;
     top: 14px;
-    right: 16px;
+    right: 25%;
+    z-index: 200;
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+}
+
+/* Mirrors #topSearchActions on the left side of the pill — same fixed top
+   row and inset, holding the autoplay/mute voice controls instead. See
+   #voiceControls in index.html; its own inline display (none/flex) still
+   gates whether the pair shows at all, this just positions and styles them
+   once they do. */
+#topSearchActionsLeft {
+    position: fixed;
+    top: 14px;
+    left: 25%;
     z-index: 200;
     display: flex;
     align-items: flex-start;
@@ -548,12 +559,21 @@ body.containers-hidden #resetLayoutBtn {
     border-radius: 50%;
     background: transparent;
     color: var(--text-muted);
-    opacity: 0.5;
+    opacity: 0;
     cursor: grab;
     touch-action: none;
     -webkit-user-select: none;
     user-select: none;
     transition: opacity 0.2s ease, background 0.2s ease;
+}
+/* Only reveal the handle once the pointer is over its panel, not all the
+   time — keeps the corner clean until the user shows intent to reposition
+   it. Stays visible mid-drag even if the pointer strays off the panel. */
+.drag-handle:hover,
+:hover > .drag-handle,
+.drag-handle:active,
+.panel-dragging > .drag-handle {
+    opacity: 0.5;
 }
 .drag-handle:hover { opacity: 1; background: var(--chip-hover-bg); }
 .drag-handle:active { cursor: grabbing; }
@@ -586,12 +606,18 @@ body.containers-hidden #resetLayoutBtn {
     border: none;
     background: transparent;
     color: var(--text-muted);
-    opacity: 0.4;
+    opacity: 0;
     cursor: nwse-resize;
     touch-action: none;
     -webkit-user-select: none;
     user-select: none;
     transition: opacity 0.2s ease;
+}
+/* Same reveal-on-container-hover behavior as .drag-handle above. */
+:hover > .resize-handle,
+.resize-handle:active,
+.panel-dragging > .resize-handle {
+    opacity: 0.4;
 }
 .resize-handle:hover { opacity: 1; }
 .resize-handle-icon {
@@ -852,7 +878,7 @@ body.theme-light .answer-hero p {
     left: 50%;
     transform: translateX(-50%);
     width: min(520px, calc(100vw - 32px));
-    padding: 16px 18px 14px;
+    padding: 12px 18px 14px;
     border-radius: 18px;
     background: var(--panel-bg);
     backdrop-filter: blur(28px) saturate(160%);
@@ -880,18 +906,6 @@ body.containers-hidden #summaryTitleBar { display: none !important; }
    (JS still flips their inline display) but never show. */
 #backButton, #headerPrevBtn { display: none !important; }
 
-/* Just the autoplay/mute toggles live in the box's bottom-left corner now —
-   Start moved down into the timeline bar itself (.timeline-begin-btn), so
-   this corner is small and the title row above can center on the box
-   itself rather than reserving space for a CTA that's no longer here. */
-.title-bar-corner-bottom-left {
-    position: absolute;
-    bottom: 10px;
-    left: 16px;
-    z-index: 1;
-    display: flex;
-}
-
 /* Top-left corner of the title bar — only ever holds the Overview button,
    shown while a location is focused (see renderHeaderState) so there's
    always a one-click way back to the topic overview from anywhere in the
@@ -907,6 +921,29 @@ body.containers-hidden #summaryTitleBar { display: none !important; }
     display: flex;
     align-items: center;
     justify-content: center;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border-radius: 50%;
+    border: 1px solid var(--back-btn-border);
+    background: var(--back-btn-bg);
+    color: var(--back-btn-text);
+    font-size: 12px;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+/* Mobile-only sheet toggle — sits in the title bar's top-right corner.
+   Hidden on desktop (see .overview-btn above for the equivalent top-left
+   slot); shown under the max-width:700px block below. */
+.mobile-sheet-toggle {
+    display: none;
+    position: absolute;
+    top: 12px;
+    right: 16px;
+    z-index: 1;
+    align-items: center;
+    justify-content: center;
     width: 30px;
     height: 30px;
     padding: 0;
@@ -914,10 +951,11 @@ body.containers-hidden #summaryTitleBar { display: none !important; }
     border: 1px solid var(--back-btn-border);
     background: var(--back-btn-bg);
     color: var(--back-btn-text);
-    font-size: 15px;
+    font-size: 13px;
     cursor: pointer;
-    transition: background 0.15s, border-color 0.15s, color 0.15s;
+    transition: background 0.15s, border-color 0.15s, color 0.15s, transform 0.25s ease;
 }
+body.mobile-sheet-expanded .mobile-sheet-toggle { transform: rotate(180deg); }
 .overview-btn:hover {
     background: var(--chip-hover-bg);
     border-color: var(--chip-hover-border);
@@ -931,8 +969,8 @@ body.containers-hidden #summaryTitleBar { display: none !important; }
 .voice-controls-row {
     display: flex;
     flex-direction: row;
-    align-items: center;
-    gap: 6px;
+    align-items: flex-start;
+    gap: 10px;
 }
 
 .panel-header {
@@ -948,7 +986,7 @@ body.containers-hidden #summaryTitleBar { display: none !important; }
     display: flex;
     flex-direction: column;
     align-items: center;
-    padding: 4px 56px 0;
+    padding: 0 56px 0;
     text-align: center;
 }
 
@@ -963,6 +1001,14 @@ body.containers-hidden #summaryTitleBar { display: none !important; }
     gap: 4px 8px;
     margin-top: 6px;
     min-height: 0;
+}
+/* Its three spans (#locFocusMeta/#locHeaderYear/#locHeaderCoords) are only
+   ever text-filled while a location is focused — otherwise they're empty
+   but still present as elements, so :empty never matches the row itself.
+   Collapse it here instead so its margin-top doesn't pad out the title
+   bar's bottom edge on the topic-only view. */
+.panel-header-meta:not(:has(*:not(:empty))) {
+    display: none;
 }
 
 .loc-focus-meta {
@@ -1490,6 +1536,43 @@ body:has(#questionBox.loc-focused) .loc-header-block { display: block; }
     padding: 4px 2px 0;
 }
 
+/* ============== COMPARE LEGEND ==============
+   Color key for two-subject "compare" answers, tying the two shaded map
+   regions/subjects to the colors used in fetchCompareShading / COMPARE_COLORS
+   in js/main.js. Only shown when a compare-style answer is on screen. */
+.compare-legend {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--answer-text);
+}
+
+.compare-legend-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.compare-legend-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.compare-legend-vs {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    opacity: 0.5;
+    letter-spacing: 0.05em;
+}
+
 /* ============== ANSWER ==============
    Centered and sized up so the result reads as the star of the panel
    instead of dense reference text — the summary is the payoff, not fine
@@ -1891,37 +1974,42 @@ body:has(#questionBox.loc-focused) .loc-header-block { display: block; }
 .loc-link:hover { color: var(--accent); }
 
 /* ============== VOICE ============== */
-/* Small round icon toggles — autoplay and mute share one compact style so
-   they read as a pair of switches next to the header title, not buttons
-   with labels. */
+/* Autoplay and mute now live as top-row buttons on the left of the search
+   pill (#topSearchActionsLeft), so they share #topSearchActions/
+   .top-search-clear's glass-pill look on the opposite side, rather than the
+   flat back-btn style they used to have tucked in the title bar corner. */
 .icon-toggle-btn {
     flex: 0 0 auto;
     display: inline-flex;
+    width: 32px;
+    height: 32px;
     align-items: center;
     justify-content: center;
-    width: 26px;
-    height: 26px;
-    padding: 0;
-    border-radius: 50%;
-    border: 1px solid var(--back-btn-border);
-    background: var(--back-btn-bg);
-    color: var(--back-btn-text);
-    font-size: 12px;
+    font-size: 13px;
     line-height: 1;
+    color: var(--top-search-query);
+    opacity: 0.55;
+    background: var(--top-search-bg);
+    backdrop-filter: blur(24px) saturate(140%);
+    -webkit-backdrop-filter: blur(24px) saturate(140%);
+    border: 1px solid var(--top-search-border);
+    border-radius: 50%;
     cursor: pointer;
-    transition: background 0.15s, border-color 0.15s, color 0.15s, transform 0.1s;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.25);
+    transition: opacity 0.15s, transform 0.15s, background 0.15s, border-color 0.15s, color 0.15s;
 }
 .icon-toggle-btn:hover {
-    background: var(--chip-hover-bg);
-    border-color: var(--chip-hover-border);
+    opacity: 1;
+    transform: scale(1.06);
 }
 .icon-toggle-btn:active { transform: scale(0.94); }
 .icon-toggle-btn.autoplay-active {
     background: rgba(var(--accent-rgb),0.15);
     border-color: rgba(var(--accent-rgb),0.5);
     color: var(--accent);
+    opacity: 1;
 }
-.icon-toggle-btn.voice-muted { opacity: 0.5; }
+.icon-toggle-btn.voice-muted { opacity: 0.4; }
 
 /* ============== RELATED SEARCHES ============== */
 .source-line {
@@ -2356,53 +2444,29 @@ body:has(#questionBox.loc-focused) .loc-header-block { display: block; }
 .mp-cta:hover { opacity: 0.88; }
 .mp-cta:active { transform: scale(0.97); }
 
-/* ============== MAP MARKER TOOLTIP ============== */
-#map-tooltip {
-    display: none;
-    position: fixed;
-    z-index: 300;
-    pointer-events: none;
-    background: var(--tooltip-bg);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
-    border: 1px solid var(--panel-border);
-    border-radius: 12px;
-    padding: 10px 14px;
-    box-shadow: 0 6px 24px rgba(0,0,0,0.3);
-    max-width: 230px;
-    transform: translate(-50%, calc(-100% - 16px));
-}
-#map-tooltip.visible { display: block; }
-.map-tooltip-name {
-    font-size: 13px;
-    font-weight: 700;
-    color: var(--tooltip-name);
-    line-height: 1.3;
-    margin-bottom: 3px;
-}
-.map-tooltip-event {
-    font-size: 12px;
-    color: var(--tooltip-event);
-    line-height: 1.35;
-    margin-bottom: 4px;
-}
-.map-tooltip-year {
-    font-size: 11px;
-    color: rgba(var(--accent-rgb),0.85);
-    font-weight: 600;
-}
-
 /* ============== MOBILE / NARROW VIEWPORTS ==============
    Below this width the desktop layout (a 400-680px search/summary panel
    pinned to the left, a 320px image panel pinned to the right) no longer
    fits side-by-side — both panels would run off the edges of the screen.
-   Instead they go nearly full-width with slim side margins.
+   Instead they go nearly full-width with slim side margins and STACK
+   vertically: #summaryTitleBar, then #currentImagePanel, then #questionBox.
 
-   The map is the app's whole point, so panels are also kept well short of
-   the full viewport height (not just narrower) — a visible strip of map
-   stays uncovered above, below, and to the sides of the text/image stack
-   rather than the panels filling the screen edge-to-edge. */
+   Their heights vary too much with content (title wrapping, photo count,
+   answer length) for a fixed CSS offset to stack them without gaps or
+   overlap, so `top` for the image panel and question box is measured and
+   set by layoutMobileStack() in js/main.js instead of hardcoded here.
+
+   The map is the app's whole point, so by default only the compact title
+   bar shows — #currentImagePanel and #questionBox stay collapsed to zero
+   height until #mobileSheetToggle (toggleMobileSheet in js/main.js) expands
+   them, and even expanded they're capped well short of the full viewport
+   so a strip of map stays visible above the timeline. */
 @media (max-width: 700px) {
+    /* The 25% inset that pulls these in toward center on desktop would
+       collide with the narrower pill here — pin them back to the edges. */
+    #topSearchActions { right: 16px; }
+    #topSearchActionsLeft { left: 16px; }
+
     #topSearchWrapper {
         min-width: 0;
         max-width: calc(100vw - 100px);
@@ -2410,7 +2474,8 @@ body:has(#questionBox.loc-focused) .loc-header-block { display: block; }
 
     #questionBox,
     #questionBox.centered,
-    #summaryTitleBar {
+    #summaryTitleBar,
+    #currentImagePanel {
         left: 10px;
         right: 10px;
         width: auto;
@@ -2418,50 +2483,53 @@ body:has(#questionBox.loc-focused) .loc-header-block { display: block; }
     }
 
     #summaryTitleBar { top: 66px; }
+    .mobile-sheet-toggle { display: flex; }
 
-    /* !important because js/main.js sets #questionBox's max-height inline
-       (to reserve room for the timeline arc, or reset it on a fresh
-       search) — those inline values assume the desktop side-by-side
-       layout and would otherwise override the mobile cap below and let
-       the panel run to the bottom of the screen. */
-    #questionBox,
     #questionBox.centered {
         top: 66px;
-        /* Bottom edge stops at 82% of viewport height, leaving a clear
-           ~18vh strip of map at the bottom rather than the panel running
-           to the bottom edge. */
         max-height: calc(82vh - 66px) !important;
     }
 
-    /* In result mode the title bar sits above #questionBox instead of
-       inside it, so the summary card needs to start lower to clear it. */
-    body:has(#questionBox.result-mode) #questionBox {
-        top: 176px;
-        max-height: calc(82vh - 176px) !important;
+    #currentImagePanel,
+    #questionBox.result-mode {
+        transition: max-height 0.35s cubic-bezier(0.4,0,0.2,1), opacity 0.3s ease,
+                    top 0.5s cubic-bezier(0.4,0,0.2,1);
     }
 
-    /* The image panel sits above the search/summary panel instead of beside
-       it, capped to a modest fraction of the viewport so together they
-       still leave the map visible above, below, and beside them. */
-    #currentImagePanel {
-        left: 10px;
-        right: 10px;
-        width: auto;
-        top: 66px;
-        max-height: 22vh;
+    /* Collapsed (default) state: hide the photo panel and full summary body
+       so the map is reachable; #mobileSheetToggle expands this back. */
+    body:not(.mobile-sheet-expanded) #currentImagePanel,
+    body:not(.mobile-sheet-expanded) #questionBox.result-mode {
+        max-height: 0 !important;
+        opacity: 0;
+        pointer-events: none;
+        overflow: hidden;
+        padding-top: 0;
+        padding-bottom: 0;
+        border-width: 0;
     }
 
-    body:has(#currentImagePanel.visible) #questionBox {
-        top: calc(22vh + 80px);
-        max-height: calc(82vh - 22vh - 80px) !important;
+    /* Expanded caps — deliberately short of the available viewport so a
+       clear strip of map stays visible between the sheet and the timeline. */
+    body.mobile-sheet-expanded #currentImagePanel.visible {
+        max-height: 20vh;
     }
-
-    body:has(#questionBox.result-mode):has(#currentImagePanel.visible) #questionBox {
-        top: calc(22vh + 190px);
-        max-height: calc(82vh - 22vh - 190px) !important;
+    body.mobile-sheet-expanded #questionBox.result-mode {
+        max-height: 40vh !important;
     }
 
     #marker-popout {
         max-width: calc(100vw - 20px);
+    }
+
+    /* The desktop arc reserves wide side gutters (clamp(64px,11vw,170px),
+       floored at 160px on the right) to clear Google Maps' zoom/pegman
+       controls — on a narrow screen that squeezes the arc into a sliver.
+       Safe-area padding keeps it clear of the home-indicator strip on
+       notched phones instead of running under it. */
+    #timeline-container {
+        padding: 6px 14px 0;
+        padding-bottom: env(safe-area-inset-bottom, 0px);
+        bottom: 0;
     }
 }

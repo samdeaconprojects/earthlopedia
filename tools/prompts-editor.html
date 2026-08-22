@@ -222,6 +222,108 @@
   .empty-msg { font-size: 13px; color: var(--ink-faint); padding: 20px 4px; text-align: center; }
 
   .loading { font-size: 13px; color: var(--ink-faint); padding: 40px 0; text-align: center; }
+
+  .tabs-section { margin-bottom: 4px; }
+  .tabs-section-label {
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin: 0 0 6px;
+  }
+  .tab-new {
+    font-family: inherit;
+    font-size: 12.5px;
+    font-weight: 600;
+    padding: 7px 12px;
+    border-radius: 999px;
+    border: 1px dashed var(--panel-border);
+    background: transparent;
+    color: var(--ink-dim);
+    cursor: pointer;
+  }
+  .tab-new:hover { background: var(--row-bg-hover); }
+  .tab-new-input {
+    font-family: inherit;
+    font-size: 12.5px;
+    font-weight: 600;
+    padding: 6px 12px;
+    border-radius: 999px;
+    border: 1px solid var(--accent);
+    background: var(--input-bg);
+    color: var(--ink);
+    width: 160px;
+  }
+  .tab-new-input:focus { outline: none; }
+  .tab-del {
+    background: none;
+    border: none;
+    color: inherit;
+    opacity: 0.7;
+    cursor: pointer;
+    margin-left: 5px;
+    font-size: 11px;
+    line-height: 1;
+    vertical-align: middle;
+  }
+  .tab-del:hover { opacity: 1; }
+
+  .gen-box {
+    background: var(--row-bg);
+    border: 1px solid var(--panel-border);
+    border-radius: 10px;
+    padding: 12px 14px;
+    margin-bottom: 14px;
+  }
+  .gen-box .gen-label { font-size: 12px; font-weight: 700; color: var(--ink-dim); margin: 0 0 8px; }
+  .gen-row { display: flex; gap: 8px; }
+  .gen-row input[type="text"] {
+    flex: 1;
+    font-family: inherit;
+    font-size: 13.5px;
+    padding: 9px 12px;
+    border-radius: 8px;
+    border: 1px solid var(--panel-border);
+    background: var(--input-bg);
+    color: var(--ink);
+  }
+  .gen-row input[type="text"]:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  .gen-row input[type="number"] {
+    width: 56px;
+    font-family: inherit;
+    font-size: 13.5px;
+    padding: 9px 8px;
+    border-radius: 8px;
+    border: 1px solid var(--panel-border);
+    background: var(--input-bg);
+    color: var(--ink);
+    text-align: center;
+  }
+  .gen-status { font-size: 11.5px; color: var(--ink-faint); margin-top: 7px; }
+  .gen-status.err { color: var(--danger); }
+
+  .row-promote {
+    flex-shrink: 0;
+    height: 26px;
+    padding: 0 9px;
+    border-radius: 6px;
+    border: none;
+    background: transparent;
+    color: var(--ink-faint);
+    font-size: 11.5px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .row-promote:hover { background: rgba(255, 107, 0, 0.12); color: var(--accent); }
+  .row-promote.is-added { color: var(--ok); cursor: default; }
+  .row-promote.is-added:hover { background: transparent; }
+  .row.is-new { animation: rowNewFlash 1.6s ease-out 1; }
+  @keyframes rowNewFlash {
+    from { background: rgba(255, 107, 0, 0.18); }
+    to { background: var(--row-bg); }
+  }
 </style>
 
 <div class="wrap">
@@ -232,8 +334,10 @@
       <p class="sub">
         Manage the landing-page suggestion chips and the prompt-builder topic pools.
         Star a prompt in the Example Prompts tab to pin it as a preferred landing chip.
-        Edits are saved straight into <code>js/main.js</code> between the
+        Edits to the live tabs are saved straight into <code>js/main.js</code> between the
         <code>PROMPTS:START</code>/<code>PROMPTS:END</code> markers — reload the app after saving to see them live.
+        Custom lists are drafts (saved to <code>tools/custom-prompt-lists.json</code>) — generate or write
+        candidates there, then send the good ones to Example Prompts.
       </p>
     </div>
     <div class="save-col">
@@ -242,11 +346,26 @@
     </div>
   </header>
 
-  <div class="tabs" id="tabs"></div>
+  <div class="tabs-section">
+    <div class="tabs" id="tabs"></div>
+  </div>
+  <div class="tabs-section">
+    <p class="tabs-section-label">Custom lists (drafts)</p>
+    <div class="tabs" id="customTabs"></div>
+  </div>
 
   <div class="panel">
     <h2 id="panelTitle"></h2>
     <p class="hint" id="panelHint"></p>
+    <div class="gen-box" id="genBox" style="display: none;">
+      <p class="gen-label">Generate candidates</p>
+      <div class="gen-row">
+        <input type="text" id="genInput" placeholder="Describe what you want, e.g. “battles fought by Hannibal”…">
+        <input type="number" id="genCount" value="5" min="1" max="15" title="How many to generate">
+        <button class="btn btn-primary" id="genBtn">Generate</button>
+      </div>
+      <p class="gen-status" id="genStatus"></p>
+    </div>
     <div class="toolrow">
       <input type="text" id="addInput" placeholder="Type a new prompt and press Enter…">
       <button class="btn" id="addBtn">Add</button>
@@ -274,21 +393,40 @@ const TABS = [
 ];
 
 let data = null; // { RANDOM_QUESTIONS, POOL: {route,timeline,battle,spread,geography}, COMPARE_A, COMPARE_B }
-let dirty = false;
-let activeTab = TABS[0].key;
+let customLists = []; // [{ id, name, prompts: [] }]
+let mainDirty = false;
+let customDirty = false;
+let activeSection = "main"; // "main" | "custom"
+let activeTab = TABS[0].key; // main TABS key, or a customLists[].id
 let filterText = "";
 let favoriteSet = new Set();
 let favOnly = false;
+let newlyGenerated = new Set(); // prompt strings just generated, for the flash highlight
+let creatingList = false;
+
+function activeCustomList() {
+  return customLists.find(l => l.id === activeTab) || null;
+}
 
 function listFor(key) {
+  const custom = customLists.find(l => l.id === key);
+  if (custom) return custom.prompts;
   if (key === "RANDOM_QUESTIONS") return data.RANDOM_QUESTIONS;
   if (key === "COMPARE_A") return data.COMPARE_A;
   if (key === "COMPARE_B") return data.COMPARE_B;
   return data.POOL[key];
 }
 
-function setDirty(v) {
-  dirty = v;
+function setMainDirty(v) {
+  mainDirty = v;
+  updateSaveState();
+}
+function setCustomDirty(v) {
+  customDirty = v;
+  updateSaveState();
+}
+function updateSaveState() {
+  const v = mainDirty || customDirty;
   document.getElementById("saveBtn").disabled = !v;
   const s = document.getElementById("statusLine");
   if (v) { s.textContent = "Unsaved changes"; s.className = "status-line"; }
@@ -298,34 +436,117 @@ function renderTabs() {
   const el = document.getElementById("tabs");
   el.innerHTML = TABS.map(t => {
     const n = listFor(t.key).length;
-    return `<button class="tab ${t.key === activeTab ? "active" : ""}" data-key="${t.key}">${t.label}<span class="count">${n}</span></button>`;
+    const isActive = activeSection === "main" && t.key === activeTab;
+    return `<button class="tab ${isActive ? "active" : ""}" data-key="${t.key}">${t.label}<span class="count">${n}</span></button>`;
   }).join("");
   el.querySelectorAll(".tab").forEach(btn => {
     btn.addEventListener("click", () => {
+      activeSection = "main";
       activeTab = btn.dataset.key;
       filterText = "";
       document.getElementById("filterInput").value = "";
       renderTabs();
+      renderCustomTabs();
       renderPanel();
     });
   });
 }
 
+function renderCustomTabs() {
+  const el = document.getElementById("customTabs");
+  const listHtml = customLists.map(l => {
+    const isActive = activeSection === "custom" && l.id === activeTab;
+    const delHtml = isActive ? `<button class="tab-del" data-del="${l.id}" title="Delete this list">✕</button>` : "";
+    return `<button class="tab ${isActive ? "active" : ""}" data-key="${l.id}">${escapeHtml(l.name)}<span class="count">${l.prompts.length}</span>${delHtml}</button>`;
+  }).join("");
+  el.innerHTML = listHtml + (creatingList
+    ? `<input type="text" id="newListInput" class="tab-new-input" placeholder="List name…" autofocus>`
+    : `<button class="tab-new" id="newListBtn">+ New list</button>`);
+
+  el.querySelectorAll(".tab").forEach(btn => {
+    btn.addEventListener("click", (e) => {
+      if (e.target.closest(".tab-del")) return;
+      activeSection = "custom";
+      activeTab = btn.dataset.key;
+      filterText = "";
+      document.getElementById("filterInput").value = "";
+      renderTabs();
+      renderCustomTabs();
+      renderPanel();
+    });
+  });
+  el.querySelectorAll(".tab-del").forEach(btn => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const id = btn.dataset.del;
+      const l = customLists.find(l => l.id === id);
+      if (!l) return;
+      if (!confirm(`Delete the list “${l.name}” and its ${l.prompts.length} prompt(s)? This can't be undone.`)) return;
+      customLists = customLists.filter(l => l.id !== id);
+      setCustomDirty(true);
+      if (customLists.length) {
+        activeTab = customLists[0].id;
+      } else {
+        activeSection = "main";
+        activeTab = TABS[0].key;
+      }
+      renderTabs();
+      renderCustomTabs();
+      renderPanel();
+    });
+  });
+  const newBtn = document.getElementById("newListBtn");
+  if (newBtn) newBtn.addEventListener("click", () => { creatingList = true; renderCustomTabs(); });
+  const newInput = document.getElementById("newListInput");
+  if (newInput) {
+    newInput.focus();
+    const commit = () => {
+      const name = newInput.value.trim();
+      creatingList = false;
+      if (!name) { renderCustomTabs(); return; }
+      const id = "custom-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+      customLists.push({ id, name, prompts: [] });
+      setCustomDirty(true);
+      activeSection = "custom";
+      activeTab = id;
+      filterText = "";
+      document.getElementById("filterInput").value = "";
+      renderTabs();
+      renderCustomTabs();
+      renderPanel();
+    };
+    newInput.addEventListener("keydown", e => {
+      if (e.key === "Enter") { e.preventDefault(); commit(); }
+      if (e.key === "Escape") { e.preventDefault(); creatingList = false; renderCustomTabs(); }
+    });
+    newInput.addEventListener("blur", commit);
+  }
+}
+
 function renderPanel() {
-  const t = TABS.find(t => t.key === activeTab);
-  const isPrompts = activeTab === "RANDOM_QUESTIONS";
-  document.getElementById("panelTitle").textContent = t.label;
-  document.getElementById("panelHint").textContent = t.hint;
+  const isCustom = activeSection === "custom";
+  const t = isCustom ? null : TABS.find(t => t.key === activeTab);
+  const cl = isCustom ? activeCustomList() : null;
+  const isPrompts = !isCustom && activeTab === "RANDOM_QUESTIONS";
+
+  document.getElementById("panelTitle").textContent = isCustom ? (cl ? cl.name : "") : t.label;
+  document.getElementById("panelHint").textContent = isCustom
+    ? "Draft list. Write or generate candidates, then send the ones you like to Example Prompts."
+    : t.hint;
   document.getElementById("addInput").placeholder =
-    isPrompts ? "Type a new example prompt and press Enter…" : "Type a new topic and press Enter…";
+    (isPrompts || isCustom) ? "Type a new prompt and press Enter…" : "Type a new topic and press Enter…";
   document.getElementById("favOnlyRow").style.display = isPrompts ? "" : "none";
   document.getElementById("favCount").textContent = favoriteSet.size;
+  document.getElementById("genBox").style.display = isCustom ? "" : "none";
+  document.getElementById("genStatus").textContent = "";
+  document.getElementById("genStatus").className = "gen-status";
   renderList();
 }
 
 function renderList() {
   const list = listFor(activeTab);
-  const isPrompts = activeTab === "RANDOM_QUESTIONS";
+  const isCustom = activeSection === "custom";
+  const isPrompts = !isCustom && activeTab === "RANDOM_QUESTIONS";
   const el = document.getElementById("list");
   const q = filterText.trim().toLowerCase();
   const indices = list.map((_, i) => i).filter(i =>
@@ -339,13 +560,20 @@ function renderList() {
 
   el.innerHTML = indices.map(i => {
     const isFav = isPrompts && favoriteSet.has(list[i]);
+    const isNew = isCustom && newlyGenerated.has(list[i]);
     const favBtn = isPrompts
       ? `<button class="row-fav ${isFav ? "is-fav" : ""}" title="${isFav ? "Unfavorite" : "Favorite"}">${isFav ? "★" : "☆"}</button>`
       : "";
+    let promoteBtn = "";
+    if (isCustom) {
+      const already = data.RANDOM_QUESTIONS.includes(list[i]);
+      promoteBtn = `<button class="row-promote ${already ? "is-added" : ""}" title="${already ? "Already in Example Prompts" : "Send to Example Prompts"}">${already ? "✓ Added" : "→ Prompts"}</button>`;
+    }
     return `
-    <div class="row ${isFav ? "is-fav" : ""}" data-i="${i}">
+    <div class="row ${isFav ? "is-fav" : ""} ${isNew ? "is-new" : ""}" data-i="${i}">
       ${favBtn}
       <div class="row-text" contenteditable="true" spellcheck="false">${escapeHtml(list[i])}</div>
+      ${promoteBtn}
       <button class="row-del" title="Delete">✕</button>
     </div>
   `;
@@ -356,6 +584,7 @@ function renderList() {
     const textEl = row.querySelector(".row-text");
     const delBtn = row.querySelector(".row-del");
     const favBtn = row.querySelector(".row-fav");
+    const promoteBtn = row.querySelector(".row-promote");
 
     textEl.addEventListener("blur", () => {
       const val = textEl.textContent.trim();
@@ -363,8 +592,9 @@ function renderList() {
       if (val === "") {
         if (isPrompts) favoriteSet.delete(arr[i]);
         arr.splice(i, 1);
-        setDirty(true);
+        isCustom ? setCustomDirty(true) : setMainDirty(true);
         renderTabs();
+        renderCustomTabs();
         renderPanel();
         return;
       }
@@ -374,7 +604,7 @@ function renderList() {
           favoriteSet.add(val);
         }
         arr[i] = val;
-        setDirty(true);
+        isCustom ? setCustomDirty(true) : setMainDirty(true);
       }
     });
     textEl.addEventListener("keydown", e => {
@@ -385,8 +615,9 @@ function renderList() {
       const arr = listFor(activeTab);
       if (isPrompts) favoriteSet.delete(arr[i]);
       arr.splice(i, 1);
-      setDirty(true);
+      isCustom ? setCustomDirty(true) : setMainDirty(true);
       renderTabs();
+      renderCustomTabs();
       renderPanel();
     });
 
@@ -395,8 +626,19 @@ function renderList() {
         const text = listFor(activeTab)[i];
         if (favoriteSet.has(text)) favoriteSet.delete(text);
         else favoriteSet.add(text);
-        setDirty(true);
+        setMainDirty(true);
         renderPanel();
+      });
+    }
+
+    if (promoteBtn) {
+      promoteBtn.addEventListener("click", () => {
+        const text = listFor(activeTab)[i];
+        if (data.RANDOM_QUESTIONS.includes(text)) return;
+        data.RANDOM_QUESTIONS.push(text);
+        setMainDirty(true);
+        renderTabs();
+        renderList();
       });
     }
   });
@@ -412,8 +654,9 @@ function addCurrent() {
   if (!val) return;
   listFor(activeTab).push(val);
   input.value = "";
-  setDirty(true);
+  activeSection === "custom" ? setCustomDirty(true) : setMainDirty(true);
   renderTabs();
+  renderCustomTabs();
   renderList();
 }
 
@@ -430,6 +673,57 @@ document.getElementById("favOnlyCheck").addEventListener("change", e => {
   renderList();
 });
 
+async function generateCandidates() {
+  const genInput = document.getElementById("genInput");
+  const genCount = document.getElementById("genCount");
+  const genBtn = document.getElementById("genBtn");
+  const status = document.getElementById("genStatus");
+  const description = genInput.value.trim();
+  if (!description) { genInput.focus(); return; }
+  const cl = activeCustomList();
+  if (!cl) return;
+
+  genBtn.disabled = true;
+  status.textContent = "Generating…";
+  status.className = "gen-status";
+  try {
+    const existing = [...cl.prompts, ...data.RANDOM_QUESTIONS];
+    const res = await fetch("/tools/generate-prompts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ description, count: genCount.value, existing }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || `HTTP ${res.status}`);
+    }
+    const { prompts } = await res.json();
+    const fresh = (prompts || []).filter(p => !cl.prompts.includes(p));
+    if (fresh.length === 0) {
+      status.textContent = "No new candidates came back — try rephrasing.";
+      status.className = "gen-status err";
+    } else {
+      cl.prompts.unshift(...fresh);
+      fresh.forEach(p => newlyGenerated.add(p));
+      setCustomDirty(true);
+      renderTabs();
+      renderCustomTabs();
+      renderList();
+      status.textContent = `Added ${fresh.length} candidate${fresh.length === 1 ? "" : "s"} at the top.`;
+      setTimeout(() => fresh.forEach(p => newlyGenerated.delete(p)), 1700);
+    }
+  } catch (err) {
+    status.textContent = "Generate failed: " + err.message;
+    status.className = "gen-status err";
+  } finally {
+    genBtn.disabled = false;
+  }
+}
+document.getElementById("genBtn").addEventListener("click", generateCandidates);
+document.getElementById("genInput").addEventListener("keydown", e => {
+  if (e.key === "Enter") { e.preventDefault(); generateCandidates(); }
+});
+
 document.getElementById("saveBtn").addEventListener("click", async () => {
   const btn = document.getElementById("saveBtn");
   const status = document.getElementById("statusLine");
@@ -437,27 +731,41 @@ document.getElementById("saveBtn").addEventListener("click", async () => {
   status.textContent = "Saving…";
   status.className = "status-line";
   try {
-    const res = await fetch("/tools/save-prompts-js", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        RANDOM_QUESTIONS: data.RANDOM_QUESTIONS,
-        FAVORITE_QUESTIONS: data.RANDOM_QUESTIONS.filter(q => favoriteSet.has(q)),
-        POOL: data.POOL,
-        COMPARE_A: data.COMPARE_A,
-        COMPARE_B: data.COMPARE_B,
-      }),
-    });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      throw new Error(body.error || `HTTP ${res.status}`);
+    const jobs = [];
+    if (mainDirty) {
+      jobs.push(fetch("/tools/save-prompts-js", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          RANDOM_QUESTIONS: data.RANDOM_QUESTIONS,
+          FAVORITE_QUESTIONS: data.RANDOM_QUESTIONS.filter(q => favoriteSet.has(q)),
+          POOL: data.POOL,
+          COMPARE_A: data.COMPARE_A,
+          COMPARE_B: data.COMPARE_B,
+        }),
+      }).then(async res => {
+        if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`);
+        mainDirty = false;
+      }));
     }
-    setDirty(false);
+    if (customDirty) {
+      jobs.push(fetch("/tools/save-custom-lists", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ lists: customLists }),
+      }).then(async res => {
+        if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`);
+        customDirty = false;
+      }));
+    }
+    await Promise.all(jobs);
+    updateSaveState();
     status.textContent = "Saved ✓";
     status.className = "status-line ok";
   } catch (err) {
     status.textContent = "Save failed: " + err.message;
     status.className = "status-line err";
+    updateSaveState();
     btn.disabled = false;
   }
 });
@@ -466,11 +774,16 @@ async function load() {
   const el = document.getElementById("list");
   el.innerHTML = `<div class="loading">Loading current prompts from js/main.js…</div>`;
   try {
-    const res = await fetch("/tools/load-prompts-js");
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    data = await res.json();
+    const [mainRes, customRes] = await Promise.all([
+      fetch("/tools/load-prompts-js"),
+      fetch("/tools/load-custom-lists"),
+    ]);
+    if (!mainRes.ok) throw new Error(`HTTP ${mainRes.status}`);
+    data = await mainRes.json();
     favoriteSet = new Set(data.FAVORITE_QUESTIONS || []);
+    customLists = customRes.ok ? ((await customRes.json()).lists || []) : [];
     renderTabs();
+    renderCustomTabs();
     renderPanel();
   } catch (err) {
     el.innerHTML = `<div class="empty-msg">Failed to load: ${err.message}.<br>Make sure the dev server (npm start, not production) is running.</div>`;

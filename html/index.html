@@ -39,6 +39,18 @@
         <button id="topSearchClearBtn" class="top-search-clear" onclick="toggleClearDisplay()" title="Hide overlays">&#10005;</button>
         <button id="resetLayoutBtn" class="top-search-clear reset-layout-btn" onclick="resetPanelLayout()" title="Move panels back to their default positions">&#10554;</button>
     </div>
+    <!-- Mirrors #topSearchActions on the opposite side of the search pill —
+         same fixed top row, same glass icon-button look, just voice controls
+         instead of the clear/reset toggles. Kept as its own fixed group (like
+         #topSearchActions) rather than living inside #summaryTitleBar, so it
+         stays anchored beside the pill regardless of where that panel gets
+         dragged. -->
+    <div id="topSearchActionsLeft">
+        <div id="voiceControls" class="voice-controls-row" style="display:none;">
+            <button id="autoplayBtn" class="icon-toggle-btn" onclick="toggleAutoplay()" title="Play a narrated tour of this summary and its locations (turns on audio)">▶</button>
+            <button id="voiceMuteBtn" class="icon-toggle-btn" onclick="toggleVoiceMute()" title="Mute narration voice">🔊</button>
+        </div>
+    </div>
     <div id="currentImagePanel" class="current-image-panel">
         <button class="drag-handle" title="Drag to move" aria-label="Move panel"><span class="drag-handle-dots"></span></button>
         <button class="resize-handle" title="Drag to resize" aria-label="Resize panel"><span class="resize-handle-icon"></span></button>
@@ -69,12 +81,12 @@
         <div class="title-bar-corner-left">
             <button id="overviewBtn" class="overview-btn" onclick="returnToOverview()" style="display:none" title="Back to overview">&#8962;</button>
         </div>
-        <div class="title-bar-corner-bottom-left">
-            <div id="voiceControls" class="voice-controls-row" style="display:none;">
-                <button id="autoplayBtn" class="icon-toggle-btn" onclick="toggleAutoplay()" title="Play a narrated tour of this summary and its locations (turns on audio)">▶</button>
-                <button id="voiceMuteBtn" class="icon-toggle-btn" onclick="toggleVoiceMute()" title="Mute narration voice">🔊</button>
-            </div>
-        </div>
+        <!-- Mobile-only: expands/collapses the photo + summary sheet below
+             this title bar so the map stays reachable by default (see
+             toggleMobileSheet in js/main.js and the max-width:700px block
+             in styles.css). Hidden on desktop, where there's no need to
+             hide the summary panels to see the map. -->
+        <button id="mobileSheetToggle" class="mobile-sheet-toggle" onclick="toggleMobileSheet()" title="Show details" aria-label="Show details">&#9662;</button>
         <div class="panel-header">
             <div class="panel-header-nav">
                 <div id="displayedQuestion" class="summary-title"></div>
@@ -94,7 +106,7 @@
         <button class="drag-handle" title="Drag to move" aria-label="Move panel"><span class="drag-handle-dots"></span></button>
         <button class="resize-handle" title="Drag to resize" aria-label="Resize panel"><span class="resize-handle-icon"></span></button>
         <button id="cancelSearchBtn" class="cancel-search-btn" onclick="cancelSearch()" style="display:none">←</button>
-        <div class="earth-title"><span class="earth-logo" aria-hidden="true"><span class="earth-logo-inner"></span></span><img class="earth-title-wordmark" src="/img/EarthlopediaLogoStraightReally.svg" alt="Earthlopedia"></div>
+        <div class="earth-title"><span class="earth-logo" aria-hidden="true"><span class="earth-logo-inner"></span></span><img class="earth-title-wordmark" src="/img/LogoBoldWiggle.svg" alt="Earthlopedia"></div>
         <div class="search-row">
             <input type="text" id="questionInput" placeholder="Search any topic, place, or event…" onkeydown="if(event.key==='Enter') askQuestion()">
             <button onclick="askQuestion()" class="ask-btn">Ask</button>
@@ -121,8 +133,9 @@
                 </div>
             </div>
         </div>
-        <div id="searchDisclaimer" class="search-disclaimer">Results are built on LLM technology and wikipedia information which can produce incorrect or inappropriate information.</div>
+        <div id="searchDisclaimer" class="search-disclaimer">Results are built on Claude and Wikipedia information which can produce incorrect or inappropriate information.</div>
         <div id="summaryContent" class="summary-content">
+            <div id="compareLegend" class="compare-legend" style="display:none"></div>
             <div id="answer"></div>
             <div id="locationsList" class="collapsible-container">
                 <button onclick="toggleCollapse()" class="collapsible-btn">📍 Locations</button>
@@ -149,7 +162,6 @@
         </div>
     </div>
     <div id="stream-ghost"></div>
-    <div id="map-tooltip"></div>
     <div id="settingsPopup" class="settings-popup" style="display:none" onclick="event.stopPropagation()">
         <div class="settings-popup-title">Settings</div>
         <div class="settings-row">

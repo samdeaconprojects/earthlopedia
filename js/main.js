@@ -60,6 +60,14 @@ const RANDOM_QUESTIONS = [
     "The island that legally belongs to no country and sits between two that claim it",
     "Map every battle that Napoleon lost",
     "Journey along the ring of fire",
+    "Trace all seven of Zheng He's treasure voyages across the Indian Ocean",
+    "Map St. Paul's four separate missionary journeys across the Roman world",
+    "Trace Ibn Battuta's five separate journeys across the Islamic world, from Mecca to China",
+    "Map Shackleton's three separate Antarctic expeditions — Nimrod, Endurance, and Quest",
+    "Trace Amundsen's three polar expeditions — the Northwest Passage, the South Pole, and the Northeast Passage",
+    "Map all five D-Day beach landings — Utah, Omaha, Gold, Juno, and Sword",
+    "Trace the three-pronged Mongol invasion routes into Europe in 1241",
+    "Map the two-pronged US island-hopping campaign across the Pacific in WWII",
 ];
 
 // Pinned/preferred prompts — curated in tools/prompts-editor.html. These are
@@ -73,6 +81,8 @@ const FAVORITE_QUESTIONS = [
     "The underground cities carved five stories deep beneath Cappadocia, Turkey",
     "Map every battle that Napoleon lost",
     "Journey along the ring of fire",
+    "Trace all seven of Zheng He's treasure voyages across the Indian Ocean",
+    "Map all five D-Day beach landings — Utah, Omaha, Gold, Juno, and Sword",
 ];
 
 // Per-template topic pools
@@ -130,6 +140,16 @@ const _POOL = {
         "the Mansa Musa pilgrimage to Mecca",
         "the Arab conquest routes across the Middle East",
         "the Roman roads across Europe",
+        "Zheng He's seven treasure voyages across the Indian Ocean",
+        "St. Paul's four missionary journeys across the Roman world",
+        "Ibn Battuta's five separate journeys across the Islamic world",
+        "Shackleton's three separate Antarctic expeditions",
+        "Amundsen's Northwest Passage, South Pole, and Northeast Passage expeditions",
+        "the five D-Day beach landings in Normandy",
+        "the three-pronged Mongol invasion of Europe in 1241",
+        "the two-pronged US island-hopping campaign across the Pacific",
+        "Vasco da Gama's three voyages to India",
+        "Marco Polo's outbound and return routes to China",
     ],
     timeline: [
         "the Roman Empire",
@@ -481,6 +501,16 @@ const PROMPT_TEMPLATES = [
             "Drake's circumnavigation of the globe",
             "the spice routes from the Moluccas to Lisbon",
             "the Hanseatic League trade routes across Northern Europe",
+            "Zheng He's seven treasure voyages across the Indian Ocean",
+            "St. Paul's four missionary journeys across the Roman world",
+            "Ibn Battuta's five separate journeys across the Islamic world",
+            "Shackleton's three separate Antarctic expeditions",
+            "Amundsen's Northwest Passage, South Pole, and Northeast Passage expeditions",
+            "the five D-Day beach landings in Normandy",
+            "the three-pronged Mongol invasion of Europe in 1241",
+            "the two-pronged US island-hopping campaign across the Pacific in WWII",
+            "Vasco da Gama's three voyages to India",
+            "Marco Polo's outbound and return routes to China",
         ],
     },
     {
@@ -1082,6 +1112,29 @@ function getLocationZoom() {
     return appSettings.locationZoom || DEFAULT_LOCATION_ZOOM;
 }
 
+// google.maps.Map#fitBounds has a quirk with very tight bounds (locations
+// clustered close together, e.g. several spots within the same city): the
+// resulting zoom can end up barely different from a whole-continent view,
+// leaving markers indistinguishable. fitBounds() itself doesn't expose the
+// zoom it's about to pick ahead of time, so we let it run and then, once the
+// map settles, nudge the zoom in if the bounds are geographically tight but
+// the zoom stayed low.
+function fitBoundsSmart(bounds, minZoomForTightBounds = 11) {
+    map.fitBounds(bounds);
+    google.maps.event.addListenerOnce(map, 'idle', () => {
+        if (map.getZoom() >= minZoomForTightBounds) return;
+        const ne = bounds.getNorthEast();
+        const sw = bounds.getSouthWest();
+        const spanLat = Math.abs(ne.lat() - sw.lat());
+        const spanLng = Math.abs(ne.lng() - sw.lng());
+        // Only boost when the bounds really are tight — wide bounds
+        // legitimately deserve a low zoom.
+        if (spanLat < 1 && spanLng < 1) {
+            map.setZoom(minZoomForTightBounds);
+        }
+    });
+}
+
 function toggleSettingsPopup(e) {
     if (e) e.stopPropagation();
     const popup = document.getElementById('settingsPopup');
@@ -1174,7 +1227,6 @@ function initMap() {
         }
     }, { capture: true });
 
-    map.addListener('idle', maybeShowPopout);
     map.addListener('zoom_changed', () => { if (map.getZoom() < 5) hideMarkerPopout(); });
 
     streetViewService = new google.maps.StreetViewService();
@@ -1214,7 +1266,7 @@ function returnToOverview() {
     } else if (activeLocations.length > 1) {
         const bounds = new google.maps.LatLngBounds();
         activeLocations.forEach(loc => bounds.extend({ lat: loc.lat, lng: loc.lng }));
-        map.fitBounds(bounds);
+        fitBoundsSmart(bounds);
     }
     if (statesStack.length === 0) {
         document.getElementById("backButton").style.display = "none";
@@ -2168,6 +2220,10 @@ async function askQuestion() {
     document.getElementById('cancelSearchBtn').style.display = 'none';
     document.body.classList.remove('containers-hidden');
     document.getElementById('topSearchClearBtn').classList.remove('active');
+    // On mobile, a fresh search should land with the map visible rather
+    // than reopening whatever expand state a previous topic was left in
+    // (see the MOBILE STACKED SHEET block and #mobileSheetToggle).
+    document.body.classList.remove('mobile-sheet-expanded');
     retryCount = 0;
     const qb = document.getElementById('questionBox');
 
@@ -2387,15 +2443,20 @@ function setCurrentImage(imageUrl, extraImages = [], description = '') {
     const img = document.getElementById('currentImageEl');
     const placeholder = document.getElementById('currentImagePlaceholder');
     const descEl = document.getElementById('currentImageDesc');
-    if (imageUrl) {
-        img.src = imageUrl;
-        img.style.display = '';
-        placeholder.style.display = 'none';
-    } else {
+    if (!imageUrl) {
+        // No image found (or none yet) — hide the whole panel rather than
+        // showing an empty frame with just the placeholder emoji.
         img.src = '';
         img.style.display = 'none';
-        placeholder.style.display = '';
+        placeholder.style.display = 'none';
+        if (descEl) descEl.textContent = '';
+        setExtraImages([]);
+        hideCurrentImage();
+        return;
     }
+    img.src = imageUrl;
+    img.style.display = '';
+    placeholder.style.display = 'none';
     if (descEl) descEl.textContent = description || '';
     setExtraImages(extraImages);
     panel.classList.add('visible');
@@ -2626,6 +2687,7 @@ function parseLocations(answer) {
         country: loc.country ?? null,
         region_countries: Array.isArray(loc.region_countries) ? loc.region_countries : null,
         route: (loc.route !== null && loc.route !== undefined && !isNaN(Number(loc.route))) ? Number(loc.route) : null,
+        compare_group: (loc.compare_group === 'A' || loc.compare_group === 'B') ? loc.compare_group : null,
     })).filter(loc => !isNaN(loc.lat) && !isNaN(loc.lng)).map((loc, i) => ({ ...loc, pathIndex: i }));
 
     let locations = [];
@@ -2705,10 +2767,6 @@ let currentQuestion = '';
 let locationImageCache = {};
 let locationSummaryCache = {}; // index -> Promise<{summary, followUps}|null>, prefetched ahead of need
 let activePopoutIndex = null;
-// Index of a popout the user explicitly closed with the × button. Suppressed
-// until a *different* marker becomes the closest one, so dismissing it
-// doesn't just get overridden on the next 'idle' event for the same marker.
-let dismissedPopoutIndex = null;
 let playbackActive = false;
 let playbackTimeouts = [];
 let playbackHighlightIndex = null;
@@ -3147,6 +3205,7 @@ function clearMap() {
     locationSummaryCache = {};
     activeShading = null;
     hideMarkerPopout();
+    hideCompareLegend();
 }
 
 function startIntroPlayback() {
@@ -3200,50 +3259,108 @@ function stopPlayback(finished = false) {
     timelineRecenter();
 }
 
-async function fetchCountryOutline(country) {
+// Colors for the two-subject "compare" shading mode — kept visually distinct from
+// each other and from the single-subject country (indigo) / region (orange) colors.
+const COMPARE_COLORS = {
+    A: { light: '#f97316', dark: '#fb923c' }, // orange — same family as single-region shading
+    B: { light: '#0ea5e9', dark: '#38bdf8' }, // sky blue
+};
+
+function countryShadeStyle(isLight) {
+    return {
+        fillColor: isLight ? '#6366f1' : '#818cf8',
+        fillOpacity: 0.12,
+        strokeColor: isLight ? '#6366f1' : '#818cf8',
+        strokeWeight: 2,
+        strokeOpacity: 0.75,
+    };
+}
+
+function regionShadeStyle(isLight) {
+    return {
+        fillColor: isLight ? '#f97316' : '#fb923c',
+        fillOpacity: 0.1,
+        strokeColor: isLight ? '#f97316' : '#fb923c',
+        strokeWeight: 1.5,
+        strokeOpacity: 0.65,
+    };
+}
+
+// Style function for compare mode — colors each GeoJson feature by the
+// 'group' property tagged on it when it was added (see fetchCompareShading).
+function compareShadeStyleFn(isLight) {
+    return (feature) => {
+        const group = feature.getProperty('group') === 'B' ? 'B' : 'A';
+        const c = COMPARE_COLORS[group];
+        const color = isLight ? c.light : c.dark;
+        return {
+            fillColor: color,
+            fillOpacity: 0.13,
+            strokeColor: color,
+            strokeWeight: 1.5,
+            strokeOpacity: 0.7,
+        };
+    };
+}
+
+// Re-applies the correct map.data style for whatever shading mode is currently
+// active. Called both right after shading is fetched and whenever the app
+// theme toggles (light/dark colors differ).
+function applyShadingStyle() {
+    const isLight = document.body.classList.contains('theme-light');
+    if (activeShading === 'country') {
+        map.data.setStyle(countryShadeStyle(isLight));
+    } else if (activeShading === 'region') {
+        map.data.setStyle(regionShadeStyle(isLight));
+    } else if (activeShading === 'compare') {
+        map.data.setStyle(compareShadeStyleFn(isLight));
+    }
+}
+
+async function fetchGeoJsonFor(name) {
     try {
         const res = await fetch(
-            `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(country)}&polygon_geojson=1&format=json&limit=1`,
+            `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(name)}&polygon_geojson=1&format=json&limit=1`,
             { headers: { 'Accept-Language': 'en' } }
         );
-        if (!res.ok) return;
+        if (!res.ok) return null;
         const data = await res.json();
-        if (!data.length || !data[0].geojson) return;
-        map.data.addGeoJson({ type: 'Feature', geometry: data[0].geojson, properties: {} });
-        const isLight = document.body.classList.contains('theme-light');
-        map.data.setStyle({
-            fillColor: isLight ? '#6366f1' : '#818cf8',
-            fillOpacity: 0.12,
-            strokeColor: isLight ? '#6366f1' : '#818cf8',
-            strokeWeight: 2,
-            strokeOpacity: 0.75,
-        });
-    } catch { /* silently ignore */ }
+        if (!data.length || !data[0].geojson) return null;
+        return data[0].geojson;
+    } catch { return null; }
+}
+
+async function fetchCountryOutline(country) {
+    const geojson = await fetchGeoJsonFor(country);
+    if (!geojson) return;
+    map.data.addGeoJson({ type: 'Feature', geometry: geojson, properties: {} });
+    applyShadingStyle();
 }
 
 async function fetchRegionShading(countries) {
-    try {
-        const results = await Promise.allSettled(
-            countries.map(c =>
-                fetch(
-                    `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(c)}&polygon_geojson=1&format=json&limit=1`,
-                    { headers: { 'Accept-Language': 'en' } }
-                ).then(r => r.json())
-            )
-        );
+    const results = await Promise.allSettled(countries.map(fetchGeoJsonFor));
+    results.forEach(r => {
+        if (r.status !== 'fulfilled' || !r.value) return;
+        map.data.addGeoJson({ type: 'Feature', geometry: r.value, properties: {} });
+    });
+    applyShadingStyle();
+}
+
+// Two-subject compare shading: fetches each subject's country/region_countries
+// independently and tags every feature it adds with which subject ('A'/'B') it
+// belongs to, so compareShadeStyleFn can color them differently.
+async function fetchCompareShading(mainLocs) {
+    for (const loc of mainLocs) {
+        const group = loc.compare_group === 'B' ? 'B' : 'A';
+        const names = loc.region_countries?.length ? loc.region_countries : (loc.country ? [loc.country] : []);
+        if (!names.length) continue;
+        const results = await Promise.allSettled(names.map(fetchGeoJsonFor));
         results.forEach(r => {
-            if (r.status !== 'fulfilled' || !r.value?.length || !r.value[0].geojson) return;
-            map.data.addGeoJson({ type: 'Feature', geometry: r.value[0].geojson, properties: {} });
+            if (r.status !== 'fulfilled' || !r.value) return;
+            map.data.addGeoJson({ type: 'Feature', geometry: r.value, properties: { group } });
         });
-        const isLight = document.body.classList.contains('theme-light');
-        map.data.setStyle({
-            fillColor: isLight ? '#f97316' : '#fb923c',
-            fillOpacity: 0.1,
-            strokeColor: isLight ? '#f97316' : '#fb923c',
-            strokeWeight: 1.5,
-            strokeOpacity: 0.65,
-        });
-    } catch { /* silently ignore */ }
+    }
+    applyShadingStyle();
 }
 
 function getMarkerScreenPos(latlng) {
@@ -3260,37 +3377,6 @@ function getMarkerScreenPos(latlng) {
         x: mapRect.left + (wPt.x - wNW.x) * scale,
         y: mapRect.top + (wPt.y - wNW.y) * scale,
     };
-}
-
-function maybeShowPopout() {
-    // Don't show popout while viewing a focused location in the sidebar
-    if (overviewHTML !== null || map.getZoom() < 5 || activeLocations.length === 0) {
-        hideMarkerPopout();
-        return;
-    }
-    const mapDiv = document.getElementById('map');
-    const mapRect = mapDiv.getBoundingClientRect();
-    const centerX = mapRect.left + mapRect.width / 2;
-    const centerY = mapRect.top + mapRect.height / 2;
-
-    let closest = null;
-    let closestDist = Infinity;
-    activeLocations.forEach((loc, i) => {
-        const pos = getMarkerScreenPos(new google.maps.LatLng(loc.lat, loc.lng));
-        if (!pos) return;
-        const dist = Math.sqrt((pos.x - centerX) ** 2 + (pos.y - centerY) ** 2);
-        if (dist < closestDist) { closestDist = dist; closest = { loc, index: i + 1, pos }; }
-    });
-
-    if (closest && closest.index !== dismissedPopoutIndex) {
-        dismissedPopoutIndex = null;
-    }
-
-    if (closest && closestDist < 250 && closest.index !== dismissedPopoutIndex) {
-        showMarkerPopoutForLocation(closest.loc, closest.index, closest.pos);
-    } else {
-        hideMarkerPopout();
-    }
 }
 
 function showMarkerPopoutForLocation(location, index, screenPos) {
@@ -3370,7 +3456,6 @@ function hideMarkerPopout() {
 }
 
 function dismissMarkerPopout() {
-    dismissedPopoutIndex = activePopoutIndex;
     hideMarkerPopout();
 }
 
@@ -3511,6 +3596,11 @@ function getRouteGroups(locations) {
 function drawRoutePolylines(locations) {
     const routeGroups = getRouteGroups(locations);
     if (!routeGroups) {
+        // A "compare" answer's locations aren't a single traceable path — they're
+        // two unrelated subjects' locations interleaved in the array. Drawing one
+        // line through all of them would draw a stray connector between the two
+        // subjects, so skip the default connecting line entirely here.
+        if (locations.some(l => l.compare_group)) return;
         if (locations.length < 2) return;
         // activeLocations is sorted chronologically (for timeline/numbering), which can
         // put same-journey stops out of physical order when only some have precise years
@@ -3569,8 +3659,14 @@ function drawRoutePolylines(locations) {
 // route, colored by that route's hue at mid-tone; locations without a route share one default.
 function makeAnimPolylineFactory(locations) {
     const routeGroups = getRouteGroups(locations);
+    // Compare answers aren't a traceable path (see drawRoutePolylines) — hand back a
+    // no-op polyline so the intro playback animates markers dropping in without also
+    // drawing a stray connecting line between the two subjects.
+    const isCompare = locations.some(l => l.compare_group);
+    const noopPolyline = { getPath: () => ({ push: () => {} }) };
     const polylines = {};
     return function getAnimPolyline(loc) {
+        if (isCompare) return noopPolyline;
         const key = (routeGroups && loc.route !== null && routeGroups.has(loc.route)) ? loc.route : '_default';
         if (!polylines[key]) {
             const color = key === '_default' ? '#6366f1' : routeColor(routeGroups.get(key), 0.5);
@@ -3617,6 +3713,28 @@ function buildImageMarkerSvg(n, color, dataUri) {
     </svg>`;
 }
 
+// Small color-key shown above the summary when a "compare" answer is on screen,
+// so the two shaded regions/marker sets are legible as "which subject is which"
+// rather than just two unexplained colors.
+function renderCompareLegend(mainLocs) {
+    const legend = document.getElementById('compareLegend');
+    if (!legend) return;
+    const labelFor = loc => loc.name.split('—')[0].trim();
+    legend.innerHTML = mainLocs
+        .map(loc => {
+            const group = loc.compare_group === 'B' ? 'B' : 'A';
+            const color = COMPARE_COLORS[group].light;
+            return `<span class="compare-legend-item"><span class="compare-legend-dot" style="background:${color}"></span>${labelFor(loc)}</span>`;
+        })
+        .join('<span class="compare-legend-vs">vs</span>');
+    legend.style.display = 'flex';
+}
+
+function hideCompareLegend() {
+    const legend = document.getElementById('compareLegend');
+    if (legend) legend.style.display = 'none';
+}
+
 function renderMarkers(locations, periods = []) {
     const bounds = new google.maps.LatLngBounds();
     const infowindow = new google.maps.InfoWindow();
@@ -3652,6 +3770,11 @@ function renderMarkers(locations, periods = []) {
             const t = count > 1 ? seen / (count - 1) : 0.5;
             routeSeenIndex[location.route] = seen + 1;
             color = routeColor(paletteIndex, t);
+        } else if (location.compare_group) {
+            // Match the region-shading/legend colors so a compare answer's markers
+            // read as "belongs to subject A/B" rather than by time, which would mix
+            // both subjects' years into one meaningless gradient.
+            color = COMPARE_COLORS[location.compare_group === 'B' ? 'B' : 'A'].light;
         } else {
             color = useTimeColor ? yearToColor(location.year, minYear, maxYear) : '#6366f1';
         }
@@ -3667,9 +3790,12 @@ function renderMarkers(locations, periods = []) {
 
         let svg, markerSize, markerAnchor;
         if (isMain) {
+            // Both subjects' anchors default to orange — differentiate them for
+            // compare answers so the two stars aren't identical on the map.
+            const mainColor = location.compare_group ? COMPARE_COLORS[location.compare_group === 'B' ? 'B' : 'A'].light : '#f97316';
             svg = `<svg xmlns="http://www.w3.org/2000/svg" width="48" height="60" viewBox="0 0 48 60">
                 <filter id="shadowM"><feDropShadow dx="0" dy="3" stdDeviation="3" flood-color="rgba(0,0,0,0.45)"/></filter>
-                <path d="M24 2 C12 2 2 12 2 24 C2 38 24 58 24 58 C24 58 46 38 46 24 C46 12 36 2 24 2 Z" fill="#f97316" filter="url(#shadowM)"/>
+                <path d="M24 2 C12 2 2 12 2 24 C2 38 24 58 24 58 C24 58 46 38 46 24 C46 12 36 2 24 2 Z" fill="${mainColor}" filter="url(#shadowM)"/>
                 <text x="24" y="30" text-anchor="middle" font-family="-apple-system,sans-serif" font-size="18" fill="#fff">★</text>
             </svg>`;
             markerSize = new google.maps.Size(48, 60);
@@ -3715,24 +3841,13 @@ function renderMarkers(locations, periods = []) {
             });
         }
 
-        const tooltip = document.getElementById('map-tooltip');
-        marker.addListener('mouseover', (e) => {
-            const [title, ...descParts] = (location.name || '').split('—');
-            const place = title.trim();
-            const event = descParts.join('—').trim();
-            const yearStr = location.year !== null && location.year !== undefined
-                ? (location.year < 0 ? `${Math.abs(location.year)} BCE` : String(location.year))
-                : null;
-            tooltip.innerHTML =
-                `<div class="map-tooltip-name">${place}</div>` +
-                (event ? `<div class="map-tooltip-event">${event}</div>` : '') +
-                (yearStr ? `<div class="map-tooltip-year">${yearStr}</div>` : '');
-            const de = e.domEvent;
-            tooltip.style.left = de.clientX + 'px';
-            tooltip.style.top = de.clientY + 'px';
-            tooltip.classList.add('visible');
+        // Hovering a marker shows the image-style popout card (same one used
+        // to preview a location before focusing it) anchored above the pin.
+        marker.addListener('mouseover', () => {
+            const pos = getMarkerScreenPos(marker.position);
+            if (pos) showMarkerPopoutForLocation(location, index + 1, pos);
         });
-        marker.addListener('mouseout', () => tooltip.classList.remove('visible'));
+        marker.addListener('mouseout', hideMarkerPopout);
 
         activeMarkers.push(marker);
         bounds.extend(marker.position);
@@ -3740,11 +3855,24 @@ function renderMarkers(locations, periods = []) {
 
     drawRoutePolylines(locations);
 
-    const mainLoc = locations.find(l => l.main);
+    const mainLocs = locations.filter(l => l.main);
+    // A genuine two-subject comparison: exactly two "main" entries, each tagged
+    // with its own distinct compare_group. Anything else (0 or 1 main, or a
+    // malformed pair) falls back to the existing single-subject handling.
+    const compareMains = mainLocs.length === 2 && mainLocs[0].compare_group && mainLocs[1].compare_group
+        && mainLocs[0].compare_group !== mainLocs[1].compare_group
+        ? mainLocs
+        : null;
+    const mainLoc = compareMains ? null : mainLocs[0];
 
     if (locations.length === 1) {
         map.setZoom(getLocationZoom());
         map.setCenter({ lat: locations[0].lat, lng: locations[0].lng });
+    } else if (compareMains) {
+        // Both subjects matter equally here — anchoring the view on just one
+        // (like the single-main branch below does) would bury the other, so
+        // fit bounds around every location from both subjects instead.
+        fitBoundsSmart(bounds);
     } else if (mainLoc) {
         // A "main" subject should visually anchor the initial view even if a
         // supporting location is geographically far away — fit bounds around
@@ -3762,21 +3890,40 @@ function renderMarkers(locations, periods = []) {
         });
         map.fitBounds(focusBounds);
         google.maps.event.addListenerOnce(map, 'idle', () => {
-            // fitBounds on a near-point bounds can over-zoom; keep a sane cap.
-            if (map.getZoom() > 8) map.setZoom(8);
+            const ne = focusBounds.getNorthEast();
+            const sw = focusBounds.getSouthWest();
+            const spanLat = Math.abs(ne.lat() - sw.lat());
+            const spanLng = Math.abs(ne.lng() - sw.lng());
+            const tight = spanLat < 1 && spanLng < 1;
+            if (map.getZoom() > 8) {
+                // fitBounds on a near-point bounds can over-zoom; keep a sane cap.
+                map.setZoom(8);
+            } else if (tight && map.getZoom() < 11) {
+                // ...but when the locations are genuinely close together (e.g.
+                // several within the same city), fitBounds can under-zoom too,
+                // leaving markers indistinguishable — nudge in.
+                map.setZoom(11);
+            }
             map.panTo({ lat: mainLoc.lat, lng: mainLoc.lng });
         });
     } else {
-        map.fitBounds(bounds);
+        fitBoundsSmart(bounds);
     }
 
     document.querySelector(".collapsible-btn").style.display = "block";
-    if (mainLoc?.region_countries?.length) {
-        activeShading = 'region';
-        fetchRegionShading(mainLoc.region_countries);
-    } else if (mainLoc?.country) {
-        activeShading = 'country';
-        fetchCountryOutline(mainLoc.country);
+    if (compareMains) {
+        activeShading = 'compare';
+        fetchCompareShading(compareMains);
+        renderCompareLegend(compareMains);
+    } else {
+        hideCompareLegend();
+        if (mainLoc?.region_countries?.length) {
+            activeShading = 'region';
+            fetchRegionShading(mainLoc.region_countries);
+        } else if (mainLoc?.country) {
+            activeShading = 'country';
+            fetchCountryOutline(mainLoc.country);
+        }
     }
 
     const timelineContainer = document.getElementById('timeline-container');
@@ -3855,23 +4002,7 @@ function applyAppTheme(isLight) {
     if (btn) btn.textContent = isLight ? '🌙' : '☀️';
     localStorage.setItem('earthlopedia-theme', isLight ? 'light' : 'dark');
     renderTimeline();
-    if (activeShading === 'country') {
-        map.data.setStyle({
-            fillColor: isLight ? '#6366f1' : '#818cf8',
-            fillOpacity: 0.12,
-            strokeColor: isLight ? '#6366f1' : '#818cf8',
-            strokeWeight: 2,
-            strokeOpacity: 0.75,
-        });
-    } else if (activeShading === 'region') {
-        map.data.setStyle({
-            fillColor: isLight ? '#f97316' : '#fb923c',
-            fillOpacity: 0.1,
-            strokeColor: isLight ? '#f97316' : '#fb923c',
-            strokeWeight: 1.5,
-            strokeOpacity: 0.65,
-        });
-    }
+    applyShadingStyle();
 }
 
 // The app theme toggle is independent — it only affects the app's own
@@ -3926,8 +4057,8 @@ function toggleMapStyle() {
 // #timeline-container and #marker-popout are intentionally left out:
 // the timeline bar's arc geometry is derived from its fixed bottom-anchored
 // position (see CONTAINER_BOTTOM_OFFSET above), and the marker popout's
-// left/top are continuously re-set in showMarkerPopoutForLocation/
-// maybeShowPopout to track a map marker — free dragging would fight both.
+// left/top are continuously re-set in showMarkerPopoutForLocation to track
+// a map marker — free dragging would fight both.
 (function() {
     // Bumped to -v2 because the result-mode default geometry for #questionBox
     // and #summaryTitleBar changed significantly (left-pinned + a separate
@@ -4323,4 +4454,93 @@ function toggleMapStyle() {
         watchModeChanges(panel);
     });
     window.addEventListener('resize', reclampAll);
+})();
+
+// ============== MOBILE STACKED SHEET ==============
+// Below the ~700px breakpoint (see the max-width:700px block in styles.css)
+// #summaryTitleBar, #currentImagePanel and #questionBox go full-width and
+// stack vertically instead of sitting side by side. Their heights vary too
+// much with content (title wrapping, photo count, answer length) for a
+// fixed CSS offset to stack them without gaps or overlap, so this measures
+// each panel's actual rendered bottom edge and pins the next one directly
+// below it — same idea as positionStreetViewSlot() above, just chained
+// across three panels instead of one.
+//
+// #currentImagePanel and #questionBox also default to collapsed (see the
+// `mobile-sheet-expanded` body class below) so the map stays reachable
+// without the user having to fight a full-screen panel — toggleMobileSheet
+// is wired to #mobileSheetToggle in #summaryTitleBar.
+(function() {
+    const MOBILE_BREAKPOINT = 700;
+    const titleBar = document.getElementById('summaryTitleBar');
+    const imgPanel = document.getElementById('currentImagePanel');
+    const qb = document.getElementById('questionBox');
+    if (!titleBar || !imgPanel || !qb) return;
+    const GAP = 10;
+
+    function isMobile() { return window.innerWidth <= MOBILE_BREAKPOINT; }
+
+    function layout() {
+        // The centered landing layout isn't part of this stack, and on
+        // desktop the panels use their own fixed top/right CSS — clear any
+        // leftover inline top from a narrower viewport so that CSS applies.
+        if (!isMobile() || qb.classList.contains('centered')) {
+            imgPanel.style.top = '';
+            qb.style.top = '';
+            return;
+        }
+        // A manually dragged panel already has an explicit position the
+        // user chose — don't fight it by re-stacking underneath it.
+        if (titleBar.classList.contains('panel-repositioned') ||
+            imgPanel.classList.contains('panel-repositioned') ||
+            qb.classList.contains('panel-repositioned')) {
+            return;
+        }
+
+        const titleShown = getComputedStyle(titleBar).display !== 'none';
+        let nextTop = titleShown ? titleBar.getBoundingClientRect().bottom + GAP : 66;
+
+        imgPanel.style.top = nextTop + 'px';
+        const imgExpanded = document.body.classList.contains('mobile-sheet-expanded') &&
+            imgPanel.classList.contains('visible');
+        if (imgExpanded) {
+            nextTop = imgPanel.getBoundingClientRect().bottom + GAP;
+        }
+        qb.style.top = nextTop + 'px';
+    }
+
+    // A class flip (result-mode, `.visible`, the expand toggle) changes
+    // #currentImagePanel's max-height, which is itself transitioning —
+    // querying its rendered bottom edge in the same tick as the flip can
+    // still catch the pre-transition size. Re-running layout() a couple of
+    // frames later, once the transition has actually started, catches the
+    // size it settles toward instead.
+    function layoutSoon() {
+        layout();
+        requestAnimationFrame(() => requestAnimationFrame(layout));
+    }
+
+    window.toggleMobileSheet = function toggleMobileSheet() {
+        const expanded = document.body.classList.toggle('mobile-sheet-expanded');
+        const btn = document.getElementById('mobileSheetToggle');
+        if (btn) {
+            const label = expanded ? 'Hide details' : 'Show details';
+            btn.title = label;
+            btn.setAttribute('aria-label', label);
+        }
+        layoutSoon();
+    };
+
+    const ro = new ResizeObserver(layout);
+    ro.observe(titleBar);
+    ro.observe(imgPanel);
+    window.addEventListener('resize', layout);
+    // Class changes drive the stack too: entering/leaving result-mode,
+    // the image panel gaining/losing `.visible`, and the expand/collapse
+    // toggle on <body> all shift where the next panel down should land.
+    new MutationObserver(layoutSoon).observe(document.body, { attributes: true, attributeFilter: ['class'] });
+    [titleBar, imgPanel, qb].forEach((el) => {
+        new MutationObserver(layoutSoon).observe(el, { attributes: true, attributeFilter: ['class'] });
+    });
+    layout();
 })();
