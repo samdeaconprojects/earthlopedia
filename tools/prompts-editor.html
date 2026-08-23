@@ -215,6 +215,25 @@
   .row-fav.is-fav { color: var(--accent); }
   .row.is-fav { background: rgba(255, 107, 0, 0.07); }
 
+  .row-text[contenteditable="false"] { cursor: default; }
+  .row-edit {
+    flex-shrink: 0;
+    width: 26px;
+    height: 26px;
+    border-radius: 6px;
+    border: none;
+    background: transparent;
+    color: var(--ink-faint);
+    font-size: 13px;
+    cursor: pointer;
+    line-height: 1;
+  }
+  .row-edit:hover { background: var(--row-bg-hover); color: var(--ink-dim); }
+  .row-edit.is-save { color: var(--ok); }
+  .row-edit.is-save:hover { background: rgba(47, 158, 91, 0.14); }
+  .row.is-editing { background: var(--row-bg-hover); }
+  .row.is-editing .row-text { color: var(--ink); }
+
   .toolrow.checkrow { align-items: center; gap: 6px; margin-top: -6px; }
   .checkrow label { font-size: 12px; color: var(--ink-dim); display: flex; align-items: center; gap: 6px; cursor: pointer; }
   .checkrow input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
@@ -232,6 +251,28 @@
     color: var(--ink-faint);
     margin: 0 0 6px;
   }
+  .main-list-section {
+    padding: 12px 14px;
+    margin-bottom: 14px;
+    background: rgba(255, 107, 0, 0.06);
+    border: 1px solid rgba(255, 107, 0, 0.25);
+    border-radius: 12px;
+  }
+  .main-list-section .tabs-section-label { color: var(--accent); }
+  .main-list-section .tabs { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+  .tab.main-tab {
+    font-size: 14px;
+    padding: 9px 16px;
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--accent-ink);
+  }
+  .tab.main-tab .count { color: rgba(255,255,255,0.8); }
+  .tab.main-tab:not(.active) {
+    background: transparent;
+    color: var(--accent);
+  }
+  .tab.main-tab:not(.active) .count { color: var(--accent); opacity: 0.7; }
   .tab-new {
     font-family: inherit;
     font-size: 12.5px;
@@ -346,11 +387,16 @@
     </div>
   </header>
 
+  <div class="tabs-section main-list-section">
+    <p class="tabs-section-label">Main list · live on the site</p>
+    <div class="tabs" id="mainTab"></div>
+  </div>
   <div class="tabs-section">
+    <p class="tabs-section-label">Topic pools · feed the prompt builder</p>
     <div class="tabs" id="tabs"></div>
   </div>
   <div class="tabs-section">
-    <p class="tabs-section-label">Custom lists (drafts)</p>
+    <p class="tabs-section-label">Custom lists · drafts</p>
     <div class="tabs" id="customTabs"></div>
   </div>
 
@@ -433,13 +479,16 @@ function updateSaveState() {
 }
 
 function renderTabs() {
-  const el = document.getElementById("tabs");
-  el.innerHTML = TABS.map(t => {
+  const mainTabEl = document.getElementById("mainTab");
+  const poolEl = document.getElementById("tabs");
+  const tabHtml = (t, extraClass) => {
     const n = listFor(t.key).length;
     const isActive = activeSection === "main" && t.key === activeTab;
-    return `<button class="tab ${isActive ? "active" : ""}" data-key="${t.key}">${t.label}<span class="count">${n}</span></button>`;
-  }).join("");
-  el.querySelectorAll(".tab").forEach(btn => {
+    return `<button class="tab ${extraClass || ""} ${isActive ? "active" : ""}" data-key="${t.key}">${t.label}<span class="count">${n}</span></button>`;
+  };
+  mainTabEl.innerHTML = tabHtml(TABS[0], "main-tab");
+  poolEl.innerHTML = TABS.slice(1).map(t => tabHtml(t)).join("");
+  [...mainTabEl.querySelectorAll(".tab"), ...poolEl.querySelectorAll(".tab")].forEach(btn => {
     btn.addEventListener("click", () => {
       activeSection = "main";
       activeTab = btn.dataset.key;
@@ -528,6 +577,7 @@ function renderPanel() {
   const t = isCustom ? null : TABS.find(t => t.key === activeTab);
   const cl = isCustom ? activeCustomList() : null;
   const isPrompts = !isCustom && activeTab === "RANDOM_QUESTIONS";
+  const canFav = !isCustom;
 
   document.getElementById("panelTitle").textContent = isCustom ? (cl ? cl.name : "") : t.label;
   document.getElementById("panelHint").textContent = isCustom
@@ -535,8 +585,8 @@ function renderPanel() {
     : t.hint;
   document.getElementById("addInput").placeholder =
     (isPrompts || isCustom) ? "Type a new prompt and press Enter…" : "Type a new topic and press Enter…";
-  document.getElementById("favOnlyRow").style.display = isPrompts ? "" : "none";
-  document.getElementById("favCount").textContent = favoriteSet.size;
+  document.getElementById("favOnlyRow").style.display = canFav ? "" : "none";
+  document.getElementById("favCount").textContent = canFav ? listFor(activeTab).filter(v => favoriteSet.has(v)).length : 0;
   document.getElementById("genBox").style.display = isCustom ? "" : "none";
   document.getElementById("genStatus").textContent = "";
   document.getElementById("genStatus").className = "gen-status";
@@ -547,10 +597,12 @@ function renderList() {
   const list = listFor(activeTab);
   const isCustom = activeSection === "custom";
   const isPrompts = !isCustom && activeTab === "RANDOM_QUESTIONS";
+  const canFav = !isCustom; // favoriting applies to any live tab, not just Example Prompts
+  const canPromote = isCustom || (!isCustom && activeTab !== "RANDOM_QUESTIONS"); // send-to-Example-Prompts everywhere but the Example Prompts tab itself
   const el = document.getElementById("list");
   const q = filterText.trim().toLowerCase();
   const indices = list.map((_, i) => i).filter(i =>
-    (!q || list[i].toLowerCase().includes(q)) && (!isPrompts || !favOnly || favoriteSet.has(list[i]))
+    (!q || list[i].toLowerCase().includes(q)) && (!canFav || !favOnly || favoriteSet.has(list[i]))
   );
 
   if (indices.length === 0) {
@@ -559,20 +611,21 @@ function renderList() {
   }
 
   el.innerHTML = indices.map(i => {
-    const isFav = isPrompts && favoriteSet.has(list[i]);
+    const isFav = canFav && favoriteSet.has(list[i]);
     const isNew = isCustom && newlyGenerated.has(list[i]);
-    const favBtn = isPrompts
+    const favBtn = canFav
       ? `<button class="row-fav ${isFav ? "is-fav" : ""}" title="${isFav ? "Unfavorite" : "Favorite"}">${isFav ? "★" : "☆"}</button>`
       : "";
     let promoteBtn = "";
-    if (isCustom) {
+    if (canPromote) {
       const already = data.RANDOM_QUESTIONS.includes(list[i]);
       promoteBtn = `<button class="row-promote ${already ? "is-added" : ""}" title="${already ? "Already in Example Prompts" : "Send to Example Prompts"}">${already ? "✓ Added" : "→ Prompts"}</button>`;
     }
     return `
     <div class="row ${isFav ? "is-fav" : ""} ${isNew ? "is-new" : ""}" data-i="${i}">
       ${favBtn}
-      <div class="row-text" contenteditable="true" spellcheck="false">${escapeHtml(list[i])}</div>
+      <div class="row-text" contenteditable="false" spellcheck="false">${escapeHtml(list[i])}</div>
+      <button class="row-edit" title="Edit">✎</button>
       ${promoteBtn}
       <button class="row-del" title="Delete">✕</button>
     </div>
@@ -582,15 +635,32 @@ function renderList() {
   el.querySelectorAll(".row").forEach(row => {
     const i = Number(row.dataset.i);
     const textEl = row.querySelector(".row-text");
+    const editBtn = row.querySelector(".row-edit");
     const delBtn = row.querySelector(".row-del");
     const favBtn = row.querySelector(".row-fav");
     const promoteBtn = row.querySelector(".row-promote");
 
-    textEl.addEventListener("blur", () => {
+    const startEdit = () => {
+      textEl.contentEditable = "true";
+      row.classList.add("is-editing");
+      editBtn.textContent = "✓";
+      editBtn.title = "Save";
+      editBtn.classList.add("is-save");
+      textEl.focus();
+      const range = document.createRange();
+      range.selectNodeContents(textEl);
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+    };
+
+    const commitEdit = () => {
       const val = textEl.textContent.trim();
       const arr = listFor(activeTab);
+      textEl.contentEditable = "false";
+      row.classList.remove("is-editing");
       if (val === "") {
-        if (isPrompts) favoriteSet.delete(arr[i]);
+        if (canFav) favoriteSet.delete(arr[i]);
         arr.splice(i, 1);
         isCustom ? setCustomDirty(true) : setMainDirty(true);
         renderTabs();
@@ -599,21 +669,30 @@ function renderList() {
         return;
       }
       if (val !== arr[i]) {
-        if (isPrompts && favoriteSet.has(arr[i])) {
+        if (canFav && favoriteSet.has(arr[i])) {
           favoriteSet.delete(arr[i]);
           favoriteSet.add(val);
         }
         arr[i] = val;
         isCustom ? setCustomDirty(true) : setMainDirty(true);
       }
+      editBtn.textContent = "✎";
+      editBtn.title = "Edit";
+      editBtn.classList.remove("is-save");
+    };
+
+    editBtn.addEventListener("click", () => {
+      if (textEl.contentEditable === "true") commitEdit();
+      else startEdit();
     });
     textEl.addEventListener("keydown", e => {
-      if (e.key === "Enter") { e.preventDefault(); textEl.blur(); }
+      if (e.key === "Enter") { e.preventDefault(); commitEdit(); }
+      if (e.key === "Escape") { e.preventDefault(); textEl.textContent = listFor(activeTab)[i]; commitEdit(); }
     });
 
     delBtn.addEventListener("click", () => {
       const arr = listFor(activeTab);
-      if (isPrompts) favoriteSet.delete(arr[i]);
+      if (canFav) favoriteSet.delete(arr[i]);
       arr.splice(i, 1);
       isCustom ? setCustomDirty(true) : setMainDirty(true);
       renderTabs();

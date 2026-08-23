@@ -68,6 +68,18 @@ const RANDOM_QUESTIONS = [
     "Map all five D-Day beach landings — Utah, Omaha, Gold, Juno, and Sword",
     "Trace the three-pronged Mongol invasion routes into Europe in 1241",
     "Map the two-pronged US island-hopping campaign across the Pacific in WWII",
+    "Tour de France route",
+    "Show Hawaii's trail of former islands",
+    "the Amazon River basin",
+    "the Yellow River and ancient China",
+    "the Ganges River and Indian civilization",
+    "the Niger River and West African trade",
+    "the Mississippi River system",
+    "the Danube River through European history",
+    "the Himalayan mountain range",
+    "the Andes Mountains and Inca roads",
+    "the Appalachian Mountains",
+    "FC Barcelona's 2009 season",
 ];
 
 // Pinned/preferred prompts — curated in tools/prompts-editor.html. These are
@@ -83,6 +95,7 @@ const FAVORITE_QUESTIONS = [
     "Journey along the ring of fire",
     "Trace all seven of Zheng He's treasure voyages across the Indian Ocean",
     "Map all five D-Day beach landings — Utah, Omaha, Gold, Juno, and Sword",
+    "Show Hawaii's trail of former islands",
 ];
 
 // Per-template topic pools
@@ -2102,6 +2115,24 @@ function setupTimelineInteraction() {
     canvas.addEventListener('pointerup', endDrag);
     canvas.addEventListener('pointercancel', endDrag);
     canvas.style.cursor = 'grab';
+
+    // The canvas's CSS size tracks the container fluidly (width: 100%), but
+    // its backing pixel buffer only gets resized inside renderTimeline() —
+    // without this, resizing the window stretches the last-drawn arc/dots
+    // to fit the new CSS box instead of redrawing them at the new size,
+    // while the CSS-positioned nav buttons (calc(50% ± Npx)) track the
+    // resize instantly. That mismatch is what reads as "one part moves but
+    // not the other". rAF-throttled so a drag-resize doesn't redraw every
+    // intermediate pixel.
+    let timelineResizeRAF = null;
+    window.addEventListener('resize', () => {
+        if (!timelineData) return;
+        if (timelineResizeRAF) cancelAnimationFrame(timelineResizeRAF);
+        timelineResizeRAF = requestAnimationFrame(() => {
+            timelineResizeRAF = null;
+            renderTimeline();
+        });
+    });
 
     canvas.addEventListener('wheel', (e) => {
         if (!timelineData) return;
@@ -4168,6 +4199,19 @@ function toggleMapStyle() {
     let zCounter = BASE_Z;
     const lastMode = new WeakMap();
 
+    // Once a panel is dragged, pinPosition() below freezes it at an explicit
+    // `left: Npx`, which — unlike the CSS defaults (`right: 24px` on
+    // #currentImagePanel, `left: 50%; transform: translateX(-50%)` on
+    // #summaryTitleBar) — does not itself track the viewport edge/center on
+    // resize. ANCHOR_FRACTION says how much of any viewport-width change to
+    // add back into a dragged panel's `left` in reclampAll() so it keeps
+    // hugging the edge it started against: 1 keeps it pinned to the right
+    // edge, 0.5 keeps it centered, 0 leaves it pinned to the left edge (the
+    // default for any panel not listed here, matching #questionBox's own
+    // "pinned to the left" CSS default).
+    const ANCHOR_FRACTION = { currentImagePanel: 1, summaryTitleBar: 0.5 };
+    let lastViewportWidth = window.innerWidth;
+
     // #questionBox alternates between the centered search layout and the
     // docked result layout; every other draggable panel has just one layout.
     function modeKey(panel) {
@@ -4512,15 +4556,23 @@ function toggleMapStyle() {
     function reclampAll() {
         const layout = loadLayout();
         let changed = false;
+        // How far the viewport just grew/shrank horizontally — added back into
+        // each dragged panel's left (scaled by its ANCHOR_FRACTION) so panels
+        // anchored to the right edge or the horizontal center keep tracking
+        // that edge/center across the resize instead of just staying put at
+        // their old absolute left and getting reclamped in place.
+        const vw = window.innerWidth;
+        const deltaX = vw - lastViewportWidth;
         DRAGGABLE_IDS.forEach((id) => {
             const panel = document.getElementById(id);
             if (!panel || !panel.classList.contains('panel-repositioned')) return;
             const entry = { z: parseInt(panel.style.zIndex, 10) || BASE_Z };
+            const shift = deltaX * (ANCHOR_FRACTION[id] || 0);
             if (panel.dataset.resized) {
                 // A manually-resized panel keeps its explicit size; just shrink it
                 // back down if the viewport got smaller than that size demands.
                 const rect = panel.getBoundingClientRect();
-                const { left, top } = clampToViewport(panel, rect.left, rect.top);
+                const { left, top } = clampToViewport(panel, rect.left + shift, rect.top);
                 const width = Math.max(MIN_PANEL_WIDTH, Math.min(rect.width, window.innerWidth - left - 8));
                 const height = Math.max(MIN_PANEL_HEIGHT, Math.min(rect.height, window.innerHeight - top - 8));
                 pinPosition(panel, left, top);
@@ -4530,7 +4582,7 @@ function toggleMapStyle() {
                 const width = naturalWidth(panel);
                 panel.style.width = width + 'px';
                 const rect = panel.getBoundingClientRect();
-                const { left, top } = clampToViewport(panel, rect.left, rect.top);
+                const { left, top } = clampToViewport(panel, rect.left + shift, rect.top);
                 pinPosition(panel, left, top, width);
                 Object.assign(entry, { left, top });
             }
@@ -4538,6 +4590,7 @@ function toggleMapStyle() {
             layout[id] = layout[id] || {};
             layout[id][modeKey(panel)] = entry;
         });
+        lastViewportWidth = vw;
         if (changed) saveLayout(layout);
     }
 
@@ -4591,9 +4644,16 @@ function toggleMapStyle() {
         // The centered landing layout isn't part of this stack, and on
         // desktop the panels use their own fixed top/right CSS — clear any
         // leftover inline top from a narrower viewport so that CSS applies.
+        // But skip that clear for a panel the user has just dragged
+        // (`panel-repositioned`, set by the drag system in pinPosition):
+        // adding that class is itself a class-attribute mutation this
+        // function is subscribed to, so without this guard every vertical
+        // drag on desktop got its inline top wiped back to the CSS default
+        // a moment after being set — the panel would appear to only move
+        // left/right, never down.
         if (!isMobile() || qb.classList.contains('centered')) {
-            imgPanel.style.top = '';
-            qb.style.top = '';
+            if (!imgPanel.classList.contains('panel-repositioned')) imgPanel.style.top = '';
+            if (!qb.classList.contains('panel-repositioned')) qb.style.top = '';
             return;
         }
         // A manually dragged panel already has an explicit position the

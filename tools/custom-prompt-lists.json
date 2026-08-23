@@ -1,3 +1,9 @@
 {
-  "lists": []
+  "lists": [
+    {
+      "id": "custom-mt5640jcxni8",
+      "name": "sp",
+      "prompts": []
+    }
+  ]
 }
