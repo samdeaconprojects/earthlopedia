@@ -1269,6 +1269,7 @@ function returnToOverview() {
     document.getElementById("answer").innerHTML = overviewHTML;
     overviewHTML = null;
     currentFocusedIndex = null;
+    applyMarkerEmphasis(null);
     updateTimelineNav();
     renderHeaderState();
     timelineRecenter();
@@ -2934,6 +2935,7 @@ function focusLocation(location, index) {
     }
 
     currentFocusedIndex = index;
+    applyMarkerEmphasis(index);
     updateTimelineNav();
     renderHeaderState();
     timelineRecenter();
@@ -3806,18 +3808,74 @@ async function fetchImageAsDataUri(url) {
     } catch { return null; }
 }
 
-function buildImageMarkerSvg(n, color, dataUri) {
+function buildImageMarkerSvg(n, color, dataUri, focused = false) {
+    // The fixed internal viewBox is unchanged by `focused` — the actual on-map
+    // size comes entirely from the scaledSize/anchor the caller passes to
+    // google.maps (see setMarkerPinIcon), so stroke/text stay proportional
+    // whether this renders at normal size or emphasized. Focused just adds a
+    // white halo ring so it also reads as "current" at a glance, not just bigger.
     return `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="46" height="58" viewBox="0 0 46 58">
         <defs>
             <filter id="shi${n}"><feDropShadow dx="0" dy="2" stdDeviation="2" flood-color="rgba(0,0,0,0.35)"/></filter>
             <clipPath id="cp${n}"><circle cx="23" cy="21" r="16"/></clipPath>
         </defs>
-        <path d="M23 2 C11 2 2 11 2 23 C2 36 23 56 23 56 C23 56 44 36 44 23 C44 11 35 2 23 2Z" fill="${color}" filter="url(#shi${n})"/>
+        <path d="M23 2 C11 2 2 11 2 23 C2 36 23 56 23 56 C23 56 44 36 44 23 C44 11 35 2 23 2Z" fill="${color}" filter="url(#shi${n})" stroke="${focused ? '#fff' : 'none'}" stroke-width="${focused ? 2.5 : 0}"/>
         <circle cx="23" cy="21" r="17.5" fill="#fff"/>
         <image href="${dataUri}" x="6" y="4" width="34" height="34" clip-path="url(#cp${n})" preserveAspectRatio="xMidYMid slice"/>
         <circle cx="34" cy="33" r="7.5" fill="${color}" stroke="#fff" stroke-width="1.5"/>
         <text x="34" y="33" text-anchor="middle" dominant-baseline="middle" font-family="-apple-system,sans-serif" font-size="${n > 9 ? 7 : 8}" font-weight="800" fill="#fff">${n}</text>
     </svg>`;
+}
+
+// Plain numbered pin (used before a location's Wikipedia thumbnail has loaded,
+// or if it never resolves). Same fixed-viewBox approach as buildImageMarkerSvg
+// above — `focused` only adds the white halo stroke; actual size comes from
+// the scaledSize/anchor setMarkerPinIcon passes to google.maps.
+function buildNumberedPinSvg(n, color, focused) {
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="30" height="38" viewBox="0 0 30 38">
+        <filter id="shadow${n}"><feDropShadow dx="0" dy="1.5" stdDeviation="1.5" flood-color="rgba(0,0,0,0.3)"/></filter>
+        <path d="M15 2 C8 2 2 8 2 15 C2 24 15 36 15 36 C15 36 28 24 28 15 C28 8 22 2 15 2 Z" fill="${color}" filter="url(#shadow${n})" stroke="${focused ? '#fff' : 'none'}" stroke-width="${focused ? 2.5 : 0}"/>
+        <text x="15" y="19" text-anchor="middle" font-family="-apple-system,sans-serif" font-size="${n > 9 ? 8 : 10}" font-weight="800" fill="#fff">${n}</text>
+    </svg>`;
+}
+
+// Rebuilds one non-main marker's icon (image thumbnail pin if its image has
+// loaded, otherwise the plain numbered pin) at normal or emphasized size, and
+// sets its opacity/z-index to match. Called both right after a marker's image
+// finishes loading and from applyMarkerEmphasis whenever focus changes, so
+// the two states (image-loaded vs not, focused vs not) never fight each other.
+function setMarkerPinIcon(marker, focused) {
+    const n = marker._pinN;
+    const color = marker._pinColor;
+    if (marker._pinImageDataUri) {
+        const s = focused ? 1.3 : 1;
+        marker.setIcon({
+            url: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(buildImageMarkerSvg(n, color, marker._pinImageDataUri, focused)),
+            scaledSize: new google.maps.Size(46 * s, 58 * s),
+            anchor: new google.maps.Point(23 * s, 56 * s),
+        });
+    } else {
+        const s = focused ? 1.35 : 1;
+        marker.setIcon({
+            url: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(buildNumberedPinSvg(n, color, focused)),
+            scaledSize: new google.maps.Size(30 * s, 38 * s),
+            anchor: new google.maps.Point(15 * s, 36 * s),
+        });
+    }
+    marker.setOpacity(focused ? 1 : 0.5);
+    marker.setZIndex(focused ? 999 : (n - 1));
+}
+
+// Makes the currently-focused location's marker pop (bigger, full opacity,
+// on top) and dims every other non-main marker, so it's unambiguous which of
+// several nearby pins the timeline/summary is currently talking about. A
+// focusedIndex of null (overview, nothing focused yet) restores every marker
+// to its normal look.
+function applyMarkerEmphasis(focusedIndex) {
+    activeMarkers.forEach(marker => {
+        if (marker._pinN === undefined) return; // main/star marker — left alone
+        setMarkerPinIcon(marker, focusedIndex !== null && marker._pinN === focusedIndex);
+    });
 }
 
 // Small color-key shown above the summary when a "compare" answer is on screen,
@@ -3929,11 +3987,7 @@ function renderMarkers(locations, periods = []) {
             markerSize = new google.maps.Size(48, 60);
             markerAnchor = new google.maps.Point(24, 58);
         } else {
-            svg = `<svg xmlns="http://www.w3.org/2000/svg" width="30" height="38" viewBox="0 0 30 38">
-                <filter id="shadow${n}"><feDropShadow dx="0" dy="1.5" stdDeviation="1.5" flood-color="rgba(0,0,0,0.3)"/></filter>
-                <path d="M15 2 C8 2 2 8 2 15 C2 24 15 36 15 36 C15 36 28 24 28 15 C28 8 22 2 15 2 Z" fill="${color}" filter="url(#shadow${n})"/>
-                <text x="15" y="19" text-anchor="middle" font-family="-apple-system,sans-serif" font-size="${n > 9 ? 8 : 10}" font-weight="800" fill="#fff">${n}</text>
-            </svg>`;
+            svg = buildNumberedPinSvg(n, color, false);
             markerSize = new google.maps.Size(30, 38);
             markerAnchor = new google.maps.Point(15, 36);
         }
@@ -3955,16 +4009,20 @@ function renderMarkers(locations, periods = []) {
         marker.addListener('mouseover', () => prefetchLocationSummary(index + 1));
 
         if (!isMain) {
+            // n/color/isMain are captured here so applyMarkerEmphasis (called
+            // whenever the focused location changes) can rebuild this same
+            // marker's icon at its normal or emphasized size without needing
+            // to re-derive anything from `location`.
+            marker._pinN = n;
+            marker._pinColor = color;
+            marker._pinImageDataUri = null;
             fetchLocationImage(location).then(({ imageUrl, extract }) => {
                 locationImageCache[n] = { imageUrl, extract };
                 if (!imageUrl) return;
                 fetchImageAsDataUri(imageUrl).then(dataUri => {
                     if (!dataUri) return;
-                    marker.setIcon({
-                        url: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(buildImageMarkerSvg(n, color, dataUri)),
-                        scaledSize: new google.maps.Size(46, 58),
-                        anchor: new google.maps.Point(23, 56),
-                    });
+                    marker._pinImageDataUri = dataUri;
+                    setMarkerPinIcon(marker, n === currentFocusedIndex);
                 });
             });
         }
