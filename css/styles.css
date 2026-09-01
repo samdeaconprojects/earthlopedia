@@ -500,6 +500,14 @@ body {
 .top-search-main:hover .top-search-edit {
     color: rgba(255,255,255,0.75);
 }
+/* Light map style carries the app into theme-light — the top bar sits over a
+   pale map then, so the white-on-glass icon needs to flip dark. */
+body.theme-light .top-search-edit {
+    color: rgba(0,0,0,0.4);
+}
+body.theme-light .top-search-main:hover .top-search-edit {
+    color: rgba(0,0,0,0.7);
+}
 
 .top-search-clear {
     display: none;
@@ -815,7 +823,9 @@ body.explore-mode #exploreBar { display: flex; }
     position: static;
     width: auto;
     height: auto;
-    margin: 0;
+    /* Breathing room between the globe and the status line now that this
+       sits where the wordmark used to (which had its own brand gap). */
+    margin: 0 0 0 12px;
     clip: auto;
     min-width: 0;
     /* max-content width capped by max-width: short messages stay a tidy
@@ -849,6 +859,16 @@ body.explore-mode #exploreBar { display: flex; }
                 opacity 0.3s ease;
 }
 #exploreBar:hover .explore-bar-search-icon { color: rgba(255,255,255,0.75); }
+
+/* Light map style: the whole app is in theme-light and #exploreBar floats over
+   a pale map, so its white decorative text/dividers need to go dark to stay
+   legible (mirrors the --top-search-query flip for the regular search pill). */
+body.theme-light .explore-bar-divider { background: rgba(0,0,0,0.16); }
+body.theme-light .explore-bar-typewriter { color: rgba(0,0,0,0.6); }
+body.theme-light .explore-bar-status,
+body.theme-light #exploreBar.bar-status-visible .explore-bar-status { color: rgba(0,0,0,0.78); }
+body.theme-light .explore-bar-search-icon { color: rgba(0,0,0,0.4); }
+body.theme-light #exploreBar:hover .explore-bar-search-icon { color: rgba(0,0,0,0.7); }
 
 /* The bar's globe idles at a slow drift and speeds up to its normal spin
    only while a discovery batch is being fetched — a subtler "working…"
@@ -888,11 +908,112 @@ body.explore-mode #exploreBar { display: flex; }
     to { background-position: 140% 0; }
 }
 
+/* ---- First-run explore hint (see #exploreHint + initExploreHint) ---- */
+/* An oversized, quiet nudge across the map on a cold load. Fades in a few
+   seconds after arrival if nothing's been touched, then retires for good the
+   first time the visitor pans, zooms, types, or clicks. pointer-events stay
+   off so it never intercepts a drag on the map beneath it. Sits under the
+   search bar (z 200) and curate pill (z 199) so its arrow reads as pointing
+   up at them. */
+#exploreHint {
+    position: fixed;
+    inset: 0;
+    z-index: 150;
+    /* Text block sits dead-center of the viewport; the arrow is pulled out of
+       flow (position: absolute below) up near the search bar. */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    /* Extra bottom padding pulls the vertically-centered text block a little
+       above true center. */
+    padding: 24px 24px 92px;
+    text-align: center;
+    pointer-events: none;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.9s ease, visibility 0s linear 0.9s;
+    /* Always white, on both light and dark maps — legibility comes from the
+       layered shadow, not the color. */
+    --eh-ink: #fff;
+    /* Tight dark shadows first (a faux outline that holds up over pale ocean /
+       desert), then a soft glow to lift it off busier terrain. */
+    --eh-shadow: 0 0 3px rgba(0, 0, 0, 0.6), 0 1px 2px rgba(0, 0, 0, 0.55),
+                 0 2px 22px rgba(0, 0, 0, 0.45), 0 0 46px rgba(0, 0, 0, 0.3);
+    font-family: Arial, 'Helvetica Neue', Helvetica, sans-serif;
+}
+#exploreHint.visible {
+    opacity: 1;
+    visibility: visible;
+    transition: opacity 0.9s ease;
+}
+
+.explore-hint-arrow {
+    position: absolute;
+    top: 156px;
+    left: 50%;
+    margin-left: -14px;
+    width: 28px;
+    height: 28px;
+    animation: explore-hint-bob 1.9s ease-in-out infinite;
+}
+.explore-hint-arrow::before {
+    content: "";
+    display: block;
+    width: 100%;
+    height: 100%;
+    border-left: 3px solid var(--eh-ink);
+    border-top: 3px solid var(--eh-ink);
+    border-radius: 3px;
+    transform: rotate(45deg);
+    filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.5));
+}
+@keyframes explore-hint-bob {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-8px); }
+}
+
+.explore-hint-text {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    animation: explore-hint-rise 1s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes explore-hint-rise {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.explore-hint-primary {
+    margin: 0;
+    font-size: clamp(28px, 4.8vw, 48px);
+    font-weight: 700;
+    line-height: 1.22;
+    letter-spacing: 0.005em;
+    color: var(--eh-ink);
+    text-shadow: var(--eh-shadow);
+}
+.explore-hint-secondary {
+    margin: 0;
+    font-size: clamp(14px, 1.7vw, 18px);
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    color: rgba(255, 255, 255, 0.95);
+    text-shadow: var(--eh-shadow);
+}
+
+/* Never over a discovery detail view. */
+body.explore-detail-open #exploreHint { display: none; }
+
+@media (prefers-reduced-motion: reduce) {
+    .explore-hint-arrow,
+    .explore-hint-text { animation: none; }
+}
+
 /* ---- Curate control (see #exploreCurate in index.html) ---- */
 #exploreCurate {
     display: none;
     position: fixed;
-    top: 74px;
+    top: 88px;
     left: 50%;
     transform: translateX(-50%);
     z-index: 199;
@@ -1063,7 +1184,7 @@ body.explore-detail-open #exploreCurate { display: none; }
 }
 
 .explore-detail-titlebar {
-    top: 78px;
+    top: 92px;
     left: 50%;
     transform: translateX(-50%);
     /* Hugs its content (title/coords text) instead of always claiming a
@@ -3247,7 +3368,7 @@ body:has(#questionBox.loc-focused) .loc-header-block { display: block; }
         max-width: calc(100vw - 96px);
     }
 
-    #exploreCurate { top: 62px; }
+    #exploreCurate { top: 74px; }
     .explore-curate-panel { width: calc(100vw - 20px); }
 
     #questionBox,
@@ -3263,8 +3384,8 @@ body:has(#questionBox.loc-focused) .loc-header-block { display: block; }
         transform: none;
     }
 
-    #summaryTitleBar,
-    .explore-detail-titlebar { top: 66px; }
+    #summaryTitleBar { top: 66px; }
+    .explore-detail-titlebar { top: 78px; }
     .mobile-sheet-toggle { display: flex; }
 
     #questionBox.centered {

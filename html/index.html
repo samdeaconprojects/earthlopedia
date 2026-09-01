@@ -14,6 +14,18 @@
 </head>
 <body class="explore-mode">
     <div id="map"></div>
+    <!-- First-run nudge painted across the map on a cold load: fades in a few
+         seconds after arrival if the visitor hasn't touched anything yet, and
+         retires for good the moment they pan, zoom, type, or click. Wiring is
+         initExploreHint() in js/main.js; styling is the .explore-hint block in
+         styles.css. Low-stakes / easy to pull out (this node + those two). -->
+    <div id="exploreHint" class="explore-hint" aria-hidden="true">
+        <span class="explore-hint-arrow" aria-hidden="true"></span>
+        <div class="explore-hint-text">
+            <p class="explore-hint-primary">Zoom and drag the map<br>to explore</p>
+            <p class="explore-hint-secondary">or search any place, era, or idea from the bar above</p>
+        </div>
+    </div>
     <div id="topSearchOuter">
         <div id="topSearchWrapper">
             <div id="topSearchBar">
@@ -78,14 +90,14 @@
          in js/main.js. Hidden unless body.explore-mode. -->
     <div id="exploreCurate" class="explore-curate">
         <button id="exploreCurateBtn" class="explore-curate-btn" onclick="toggleExploreCuratePanel(event)" title="Curate what Explore surfaces" aria-haspopup="true" aria-expanded="false">
-            <span class="ecb-icon" aria-hidden="true">&#9776;</span>
-            <span id="exploreCurateLabel" class="explore-curate-label">Curate</span>
+            <span class="ecb-icon" aria-hidden="true">&#129517;</span>
+            <span id="exploreCurateLabel" class="explore-curate-label">Curate Explore</span>
         </button>
         <div id="exploreCuratePanel" class="explore-curate-panel" style="display:none" role="dialog" aria-label="Curate Explore">
             <div class="ecp-section">
                 <label class="ecp-heading" for="exploreFocusInput">Focus on</label>
                 <input id="exploreFocusInput" class="ecp-focus-input" type="text" autocomplete="off"
-                       placeholder="e.g. volcanoes, Cold War history, Art Deco"
+                       placeholder="e.g. volcanoes, Author Birthplaces, Art Deco"
                        onkeydown="if (event.key === 'Enter') applyExploreCuration()">
                 <div class="ecp-hint">Anything you like — a theme, era, style, or subject.</div>
             </div>

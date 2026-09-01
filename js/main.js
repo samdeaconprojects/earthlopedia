@@ -1340,6 +1340,50 @@ document.addEventListener('DOMContentLoaded', initSettingsUI);
 // intro is timed from page load rather than from whenever the Maps script
 // finishes loading.
 document.addEventListener('DOMContentLoaded', initExploreBarTypewriter);
+
+// ---- First-run explore hint (#exploreHint in index.html) -------------------
+// Big, quiet overlay across the map on a cold load: nudges a first-time
+// visitor to either wander (zoom/drag) or search from the bar up top. Shows
+// itself a few seconds after load, but only if nothing's been touched yet, and
+// retires permanently the moment the user does anything. Deliberately
+// low-stakes / easy to pull: this block + #exploreHint + the .explore-hint
+// rules in styles.css, nothing else hooks it.
+const EXPLORE_HINT_DELAY = 4000;
+let exploreHintTimer = null;
+let exploreHintDone = false;
+
+function showExploreHint() {
+    exploreHintTimer = null;
+    if (exploreHintDone) return;
+    // Only over a clean explore map — not on top of a restored search result,
+    // and not once discovery pins have already started landing.
+    if (!document.body.classList.contains('explore-mode')) return;
+    if (exploreMarkers.length > 0) return;
+    document.getElementById('exploreHint')?.classList.add('visible');
+}
+
+function dismissExploreHint() {
+    if (exploreHintDone) return;
+    exploreHintDone = true;
+    if (exploreHintTimer) { clearTimeout(exploreHintTimer); exploreHintTimer = null; }
+    const el = document.getElementById('exploreHint');
+    if (el) {
+        el.classList.remove('visible');
+        setTimeout(() => el.remove(), 950);   // drop it once the fade-out ends
+    }
+    window.removeEventListener('keydown', dismissExploreHint, true);
+}
+
+function initExploreHint() {
+    if (!document.getElementById('exploreHint')) return;
+    exploreHintTimer = setTimeout(showExploreHint, EXPLORE_HINT_DELAY);
+    // Any genuine intent to explore or search kills it for good: a keypress,
+    // or a pointer/scroll gesture anywhere (map drag, bar click, curate…).
+    window.addEventListener('keydown', dismissExploreHint, true);
+    ['pointerdown', 'wheel', 'touchstart'].forEach(evt =>
+        window.addEventListener(evt, dismissExploreHint, { once: true, passive: true, capture: true }));
+}
+document.addEventListener('DOMContentLoaded', initExploreHint);
 // Re-check the day/night schedule periodically so the theme keeps up while
 // the app is left open across the evening threshold.
 setInterval(applyAutoDarkMode, 5 * 60 * 1000);
@@ -3167,8 +3211,8 @@ function exploreDiscoveryMatchesCuration(discovery) {
     return exploreCurateCats.has(discovery.category);
 }
 
-// Short summary shown on the collapsed curate button ("Curate" when nothing
-// is set, otherwise the focus text and/or category count).
+// Short summary shown on the collapsed curate button ("Curate Explore" when
+// nothing is set, otherwise the focus text and/or category count).
 function exploreCurateSummary() {
     const parts = [];
     if (exploreFocus) parts.push(`“${exploreFocus}”`);
@@ -3177,7 +3221,7 @@ function exploreCurateSummary() {
             ? EXPLORE_CATEGORY_LABEL[[...exploreCurateCats][0]]
             : `${exploreCurateCats.size} categories`);
     }
-    return parts.length ? parts.join(' · ') : 'Curate';
+    return parts.length ? parts.join(' · ') : 'Curate Explore';
 }
 
 // Push current state into the panel controls + the collapsed button.
@@ -4314,10 +4358,13 @@ async function spawnDiscoveries(b) {
             }
         }
 
-        // A new batch means the user has wandered on from whatever the
-        // detail panel was showing — close it rather than leave it open over
-        // an area of the map they've left behind.
-        closeExploreDetail();
+        // A new batch normally means the user has wandered on from whatever
+        // the detail panel was showing — close it. But if they still have a
+        // location selected, leave its panel open and just drop the new pins
+        // onto the map behind it (and skip the fit-to-bounds camera move
+        // below, so the back map doesn't lurch while they're reading).
+        const keepDetailOpen = !!exploreDetailDiscovery;
+        if (!keepDetailOpen) closeExploreDetail();
         // Pins from earlier batches stay on the map — wandering off to a new
         // area shouldn't erase what was already discovered elsewhere. See
         // resetExploreDiscoveries() for the explicit "clear everything" action.
@@ -4337,7 +4384,7 @@ async function spawnDiscoveries(b) {
                 ? `“${exploreFocus}” place${discoveries.length === 1 ? '' : 's'}`
                 : `place${discoveries.length === 1 ? '' : 's'}`;
             setExploreBarStatus(`${discoveries.length} ${noun} ${exploreCenterPlace ? `${prep} ${exploreCenterPlace}` : areaWord}`);
-            fitExploreDiscoveries(newBatch);
+            if (!keepDetailOpen) fitExploreDiscoveries(newBatch);
         }
         exploreLastBounds = b;
     } catch (error) {
