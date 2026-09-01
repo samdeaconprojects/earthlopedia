@@ -12,7 +12,7 @@
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="../js/main.js" defer></script>
 </head>
-<body>
+<body class="explore-mode">
     <div id="map"></div>
     <div id="topSearchOuter">
         <div id="topSearchWrapper">
@@ -25,8 +25,7 @@
             <div id="topLoadingIndicator">
                 <span class="earth-logo earth-logo-sm" aria-hidden="true"><span class="earth-logo-inner"></span></span>
                 <div class="loading-text">
-                    <div class="loading-label">Exploring the world…</div>
-                    <div class="loading-eta">Usually takes about 20–40 seconds</div>
+                    <div class="loading-label">Searching… Est. 20–40 seconds</div>
                 </div>
             </div>
         </div>
@@ -38,6 +37,72 @@
     <div id="topSearchActions">
         <button id="topSearchClearBtn" class="top-search-clear" onclick="toggleClearDisplay()" title="Hide overlays">&#10005;</button>
         <button id="resetLayoutBtn" class="top-search-clear reset-layout-btn" onclick="resetPanelLayout()" title="Move panels back to their default positions">&#10554;</button>
+    </div>
+    <!-- Explore mode is the app's permanent ground state now (there's no
+         longer a toggle out of it) — this bar occupies the same top-center
+         spot #topSearchOuter normally does, since that pill is hidden while
+         exploring. -->
+    <!-- The whole bar is the click target (mirrors .top-search-main below,
+         same "click anywhere to search" pattern) rather than just the icon:
+         clicking it opens the search container (#questionBox) over the live
+         explore map, and its back arrow / an outside click return here. -->
+    <div id="exploreBar" class="explore-bar brand-only" onclick="exploreSearchInstead()" title="Search instead">
+        <!-- Same globe+wordmark lockup as #questionBox's .earth-title (the
+             search container's logo), just scaled down to bar height. -->
+        <span class="explore-bar-brand" aria-hidden="true">
+            <span class="explore-bar-icon-globe earth-logo earth-logo-sm"><span class="earth-logo-inner"></span></span>
+            <img class="explore-bar-wordmark" src="/img/LogoBoldWiggle.svg" alt="">
+        </span>
+        <!-- Decorative: a rotating set of example searches typed out one
+             character at a time (see initExploreBarTypewriter in js/main.js),
+             sitting where a real search field's placeholder would be. Hidden
+             whenever .bar-status-visible takes over the bar with a live
+             discovery status. aria-hidden so screen readers keep hearing the
+             #exploreBarStatus line instead. -->
+        <span class="explore-bar-divider" aria-hidden="true"></span>
+        <span id="exploreBarTypewriter" class="explore-bar-typewriter" aria-hidden="true"><span class="ebt-text"></span><span class="ebt-caret"></span></span>
+        <!-- Visually hidden (see .explore-bar-status sr-only rule) but still
+             kept in the DOM and updated live by setExploreBarStatus, so
+             screen readers still hear discovery-count/zoom-in state that
+             sighted users now just get from the logo + search icon. -->
+        <span id="exploreBarStatus" class="explore-bar-status">Pan or zoom to discover places</span>
+        <span class="explore-bar-search-icon" aria-hidden="true">&#128269;</span>
+    </div>
+    <!-- Curate control for Explore mode — a separate fixed pill under
+         #exploreBar (NOT inside it: the whole bar is a click-to-search
+         target). Lets the wanderer bias the discovery batches toward a
+         free-text interest and/or a subset of the four categories. Both are
+         passed through to /explore-nearby and /explore-related and folded
+         into the model prompt; the category set is also enforced client-side
+         as a safety net. See toggleExploreCuratePanel / applyExploreCuration
+         in js/main.js. Hidden unless body.explore-mode. -->
+    <div id="exploreCurate" class="explore-curate">
+        <button id="exploreCurateBtn" class="explore-curate-btn" onclick="toggleExploreCuratePanel(event)" title="Curate what Explore surfaces" aria-haspopup="true" aria-expanded="false">
+            <span class="ecb-icon" aria-hidden="true">&#9776;</span>
+            <span id="exploreCurateLabel" class="explore-curate-label">Curate</span>
+        </button>
+        <div id="exploreCuratePanel" class="explore-curate-panel" style="display:none" role="dialog" aria-label="Curate Explore">
+            <div class="ecp-section">
+                <label class="ecp-heading" for="exploreFocusInput">Focus on</label>
+                <input id="exploreFocusInput" class="ecp-focus-input" type="text" autocomplete="off"
+                       placeholder="e.g. volcanoes, Cold War history, Art Deco"
+                       onkeydown="if (event.key === 'Enter') applyExploreCuration()">
+                <div class="ecp-hint">Anything you like — a theme, era, style, or subject.</div>
+            </div>
+            <div class="ecp-section">
+                <div class="ecp-heading">Categories</div>
+                <div class="ecp-cats">
+                    <button type="button" class="ecp-cat" data-cat="history" onclick="toggleExploreCurateCat(this)">🏛️ History</button>
+                    <button type="button" class="ecp-cat" data-cat="nature" onclick="toggleExploreCurateCat(this)">🌿 Nature</button>
+                    <button type="button" class="ecp-cat" data-cat="culture" onclick="toggleExploreCurateCat(this)">🎨 Culture</button>
+                    <button type="button" class="ecp-cat" data-cat="oddity" onclick="toggleExploreCurateCat(this)">✨ Oddity</button>
+                </div>
+            </div>
+            <div class="ecp-actions">
+                <button type="button" class="ecp-clear" onclick="clearExploreCuration()">Clear</button>
+                <button type="button" class="ecp-apply" onclick="applyExploreCuration()">Apply</button>
+            </div>
+        </div>
     </div>
     <!-- Mirrors #topSearchActions on the opposite side of the search pill —
          same fixed top row, same glass icon-button look, just voice controls
@@ -102,38 +167,50 @@
             </div>
         </div>
     </div>
-    <div id="questionBox" class="centered">
+    <!-- Starts with no mode class: the app now opens straight into Explore
+         mode (see body.explore-mode above, which force-hides this panel
+         entirely) rather than this landing box. exitExploreMode() in
+         js/main.js adds "centered" back the first time this becomes visible,
+         so it's never shown classless. -->
+    <div id="questionBox">
         <button class="drag-handle" title="Drag to move" aria-label="Move panel"><span class="drag-handle-dots"></span></button>
         <button class="resize-handle" title="Drag to resize" aria-label="Resize panel"><span class="resize-handle-icon"></span></button>
         <button id="cancelSearchBtn" class="cancel-search-btn" onclick="cancelSearch()" style="display:none">←</button>
+        <!-- Return to Explore mode — mirrors #cancelSearchBtn in the opposite
+             (top-right) corner of the search container. Only shown while the
+             container is the centered search box (not a result, not mid-search,
+             not while the back arrow itself already points at Explore). See
+             updateExploreNav in js/main.js. -->
+        <button id="exploreReturnBtn" class="explore-return-btn" onclick="enterExploreMode()" title="Return to Explore" style="display:none">
+            <span aria-hidden="true">&#129517;</span><span class="erb-label">Explore</span>
+        </button>
         <div class="earth-title"><span class="earth-logo" aria-hidden="true"><span class="earth-logo-inner"></span></span><img class="earth-title-wordmark" src="/img/LogoBoldWiggle.svg" alt="Earthlopedia"></div>
-        <div class="search-row">
-            <input type="text" id="questionInput" placeholder="Search any topic, place, or event…" onkeydown="if(event.key==='Enter') askQuestion()">
-            <button onclick="askQuestion()" class="ask-btn">Ask</button>
-            <button id="theme-toggle" onclick="toggleTheme()" title="Toggle app theme">☀️</button>
-            <button id="map-style-toggle" onclick="toggleMapStyle()" title="Toggle map style">🗺️</button>
-            <button id="settings-toggle" onclick="toggleSettingsPopup(event)" title="Settings">⚙️</button>
-        </div>
-        <div class="detail-slider-row">
-            <span class="detail-label">Brief</span>
-            <input type="range" id="detailSlider" min="1" max="5" value="4" class="detail-slider">
-            <span class="detail-label">Detailed</span>
-        </div>
-        <div id="landingSuggestions">
-            <div class="suggestion-chips-row">
-                <div id="randomQuestionChips" class="suggestion-chips"></div>
-                <button id="refreshChipsBtn" class="refresh-chips-btn" onclick="initLandingSuggestions()" title="Refresh suggestions">↺</button>
+        <div id="landingSearchPane" class="landing-pane">
+            <div class="search-row">
+                <input type="text" id="questionInput" placeholder="Search any topic, place, or event…" onkeydown="if(event.key==='Enter') askQuestion()">
+                <button onclick="askQuestion()" class="ask-btn">Ask</button>
             </div>
-            <div class="prompt-builder-wrap">
-                <button class="prompt-builder-toggle" onclick="togglePromptBuilder()">
-                    <span class="pb-toggle-icon" id="pbToggleIcon">▸</span> Prompt ideas
-                </button>
-                <div id="promptBuilderPanel" class="prompt-builder-panel">
-                    <div class="starter-grid" id="starterGrid"></div>
+            <div class="detail-slider-row">
+                <span class="detail-label">Brief</span>
+                <input type="range" id="detailSlider" min="1" max="5" value="4" class="detail-slider">
+                <span class="detail-label">Detailed</span>
+            </div>
+            <div id="landingSuggestions">
+                <div class="suggestion-chips-row">
+                    <div id="randomQuestionChips" class="suggestion-chips"></div>
+                    <button id="refreshChipsBtn" class="refresh-chips-btn" onclick="initLandingSuggestions()" title="Refresh suggestions">↺</button>
+                </div>
+                <div class="prompt-builder-wrap">
+                    <button class="prompt-builder-toggle" onclick="togglePromptBuilder()">
+                        <span class="pb-toggle-icon" id="pbToggleIcon">▸</span> Prompt ideas
+                    </button>
+                    <div id="promptBuilderPanel" class="prompt-builder-panel">
+                        <div class="starter-grid" id="starterGrid"></div>
+                    </div>
                 </div>
             </div>
+            <div id="searchDisclaimer" class="search-disclaimer">Results are built on Claude and Wikipedia information which can produce incorrect or inappropriate information.</div>
         </div>
-        <div id="searchDisclaimer" class="search-disclaimer">Results are built on Claude and Wikipedia information which can produce incorrect or inappropriate information.</div>
         <div id="summaryContent" class="summary-content">
             <div id="compareLegend" class="compare-legend" style="display:none"></div>
             <div id="answer"></div>
@@ -142,6 +219,10 @@
                 <div class="collapsible-content"></div>
             </div>
         </div>
+        <!-- Settings gear, docked to the search box's bottom-right corner (was
+             an inline button in .search-row). Theme / map-style controls live
+             inside the popup it opens now — see #settingsPopup. -->
+        <button id="settings-toggle" onclick="toggleSettingsPopup(event)" title="Settings">⚙️</button>
     </div>
     <canvas id="timeline-fade"></canvas>
     <div id="timeline-container">
@@ -171,6 +252,20 @@
             </label>
             <input type="checkbox" id="settingAutoDark" class="settings-toggle-input" checked onchange="updateSetting('autoDarkMode', this.checked)">
         </div>
+        <div class="settings-row">
+            <label class="settings-label">
+                <span>App theme</span>
+                <span class="settings-sublabel">Light or dark panels and controls</span>
+            </label>
+            <button id="theme-toggle" class="settings-icon-btn" onclick="toggleTheme()" title="Toggle app theme">☀️</button>
+        </div>
+        <div class="settings-row">
+            <label class="settings-label">
+                <span>Map style</span>
+                <span class="settings-sublabel">Light or dark map — also sets the app theme to match</span>
+            </label>
+            <button id="map-style-toggle" class="settings-icon-btn" onclick="toggleMapStyle()" title="Toggle map style">🗺️</button>
+        </div>
         <div class="settings-row settings-row-col">
             <label for="settingZoom" class="settings-label">
                 <span>Location zoom level</span>
@@ -188,8 +283,8 @@
             </div>
         </div>
     </div>
-    <div id="marker-popout">
-        <button class="mp-close" onclick="dismissMarkerPopout()" title="Dismiss" aria-label="Dismiss">&times;</button>
+    <div id="marker-popout" role="button" tabindex="0" onclick="handlePopoutClick()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();handlePopoutClick();}">
+        <button class="mp-close" onclick="event.stopPropagation(); dismissMarkerPopout()" title="Dismiss" aria-label="Dismiss">&times;</button>
         <div class="mp-img-wrap">
             <img id="mp-img" class="mp-img" src="" alt="" style="display:none">
             <div class="mp-img-placeholder">🌍</div>
@@ -203,7 +298,41 @@
             </div>
             <div class="mp-extract"></div>
         </div>
-        <button class="mp-cta" onclick="handlePopoutClick()">Full story →</button>
+    </div>
+    <!-- Explore mode's "pull up the view" panels — opened by clicking a
+         discovery pin (see openExploreDetail in js/main.js). Split into
+         three pieces that mirror the regular per-location layout (title bar
+         top-center, summary well on the left, images on the right, plus the
+         shared #loc-streetview-slot trailing the image panel) rather than
+         one combined card, so it reads as the same layout the rest of the
+         app uses. Kept as separate elements from
+         #questionBox/#summaryTitleBar/#currentImagePanel rather than reusing
+         them directly: those may already hold a real search result hidden
+         underneath explore mode, and writing into them here would clobber
+         it. Reuses several of their/#marker-popout's CSS classes
+         (.loc-focus-title, .current-image-frame, .mp-cta, …) for a visually
+         consistent look without duplicating that styling. -->
+    <div id="edpTitleBar" class="explore-detail-titlebar">
+        <button class="mp-close explore-detail-close" onclick="closeExploreDetail()" title="Back to exploring" aria-label="Close">&times;</button>
+        <span id="edpCategory" class="explore-detail-category"></span>
+        <div id="edpTitle" class="loc-focus-title"></div>
+        <div id="edpCoords" class="loc-focus-coords"></div>
+    </div>
+    <div id="edpSummaryPanel" class="explore-detail-summary-panel">
+        <div id="edpSummary" class="loc-focus-summary explore-detail-summary"></div>
+        <button id="edpDeepDiveBtn" class="mp-cta explore-detail-deepdive-btn" onclick="deepDiveExploreDetail()">Full search deep dive →</button>
+        <div id="edpSimilarSection" class="explore-detail-similar">
+            <div class="explore-detail-similar-label">Where to next</div>
+            <div id="edpSimilarList" class="explore-detail-similar-list"></div>
+        </div>
+    </div>
+    <div id="edpImagePanel" class="explore-detail-image-panel">
+        <div class="current-image-frame">
+            <img id="edpImg" class="current-image-el" src="" alt="" style="display:none">
+            <div id="edpImgPlaceholder" class="current-image-placeholder">🌍</div>
+            <div id="edpImgDesc" class="current-image-desc"></div>
+        </div>
+        <div id="edpExtraImages" class="current-image-extra"></div>
     </div>
 </body>
 </html>

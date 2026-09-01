@@ -255,6 +255,56 @@ app.post('/location-summary', async (req, res) => {
     }
 });
 
+// Lightweight cross-check: compares just the summary's opening claim against
+// the Wikipedia extract already fetched client-side for the topic image.
+// Deliberately narrow — only flags a clear, specific contradiction (a
+// conflicting date/name/place/number for the same fact), never omissions or
+// differing detail, so it stays a rare, trustworthy signal rather than noise.
+app.post('/fact-check', async (req, res) => {
+    try {
+        const { summary, extract } = req.body || {};
+        if (typeof summary !== 'string' || typeof extract !== 'string' || !summary.trim() || !extract.trim()) {
+            return res.json({ flag: false });
+        }
+
+        const response = await anthropic.messages.create({
+            model: 'claude-haiku-4-5-20251001',
+            max_tokens: 150,
+            temperature: 0,
+            messages: [{
+                role: 'user',
+                content: `You are a careful, conservative fact-checker. Compare CLAIM against REFERENCE (a Wikipedia summary of the same topic).
+
+CLAIM:
+"""${summary.slice(0, 1200)}"""
+
+REFERENCE (Wikipedia):
+"""${extract.slice(0, 1200)}"""
+
+Only flag a clear, specific factual contradiction between the two — e.g. a conflicting date, name, location, or number given for the same fact. Do NOT flag omissions, differing emphasis, differing level of detail, broader/narrower framing, or anything the reference simply doesn't mention. When in doubt, do not flag.
+
+Reply with ONLY JSON, nothing else:
+{"flag": false}
+or
+{"flag": true, "note": "<under 14 words, plainly naming the contradiction>"}`
+            }],
+        });
+
+        const raw = response.content[0].text.trim();
+        const start = raw.indexOf('{');
+        const end = raw.lastIndexOf('}');
+        if (start === -1 || end === -1) return res.json({ flag: false });
+        const parsed = JSON.parse(raw.slice(start, end + 1));
+        res.json({
+            flag: !!parsed.flag,
+            note: typeof parsed.note === 'string' ? parsed.note.trim() : null,
+        });
+    } catch (error) {
+        console.error('Error in /fact-check:', error.message);
+        res.json({ flag: false });
+    }
+});
+
 app.post('/followup-quick-answer', async (req, res) => {
     try {
         const { question, locationName, event, year, followUp } = req.body;
@@ -275,6 +325,200 @@ app.post('/followup-quick-answer', async (req, res) => {
     } catch (error) {
         console.error("Error in /followup-quick-answer:", error.message);
         res.status(500).json({ answer: null });
+    }
+});
+
+const EXPLORE_CATEGORIES = ['history', 'nature', 'culture', 'oddity'];
+
+// Turns the Explore "Curate" panel's free-text focus + category subset into
+// prompt fragments shared by /explore-nearby and /explore-related, plus the
+// validated category allow-list to filter the model's output against.
+// `allowedCats` is null when the user hasn't constrained categories.
+function buildExploreCuration(focus, categories) {
+    const cleanFocus = typeof focus === 'string' ? focus.trim().slice(0, 120) : '';
+    // A focus is a hard filter, not a nudge — the model otherwise pads the
+    // list back up to five with famous-but-unrelated nearby places (ask for
+    // "volcanoes" in Croatia and get Dubrovnik's old town). Spell out that a
+    // short list, or none at all, is the correct answer.
+    const focusBlock = cleanFocus
+        ? `\n\nHARD REQUIREMENT — the wanderer only wants places about: ${cleanFocus}
+- Every place you return must genuinely, specifically be about "${cleanFocus}". Not loosely adjacent — actually about it.
+- Do NOT include a place just to reach five. Returning three, one, or an empty array [] is correct and expected when the visible area has little to do with "${cleanFocus}".
+- Never substitute a famous nearby landmark that isn't about "${cleanFocus}".
+- Never relocate a matching place from elsewhere in the world into this area, and never invent one. If a place's real location is outside the given bounds, leave it out.
+- Set "match" to true only if you are confident the place is really about "${cleanFocus}"; the server drops any place with "match": false.`
+        : '';
+    const focusMatchField = cleanFocus ? ', "match": true' : '';
+
+    let allowedCats = Array.isArray(categories)
+        ? categories.filter(c => EXPLORE_CATEGORIES.includes(c))
+        : null;
+    if (allowedCats && (allowedCats.length === 0 || allowedCats.length === EXPLORE_CATEGORIES.length)) {
+        allowedCats = null; // no real constraint
+    }
+    const categoryLine = allowedCats
+        ? `Only include places whose category is one of: ${allowedCats.join(', ')}. Each place's "category" field must be exactly one of those.`
+        : `Also give each place a category: exactly one of "history", "nature", "culture", "oddity".`;
+
+    return { cleanFocus, focusBlock, focusMatchField, categoryLine, allowedCats };
+}
+
+app.post('/explore-nearby', async (req, res) => {
+    try {
+        const { lat, lng, north, south, east, west, exclude, focus, categories } = req.body || {};
+        if ([lat, lng, north, south, east, west].some(n => typeof n !== 'number' || Number.isNaN(n))) {
+            return res.status(400).json({ error: 'Missing or invalid bounds', discoveries: [] });
+        }
+        const excludeList = Array.isArray(exclude) ? exclude.filter(s => typeof s === 'string').slice(-40) : [];
+        const excludeBlock = excludeList.length
+            ? `\n\nSkip these — already shown to this person:\n${excludeList.map(n => `- ${n}`).join('\n')}`
+            : '';
+        // User-set curation from the Explore "Curate" panel (see js/main.js).
+        const { cleanFocus, focusBlock, focusMatchField, categoryLine, allowedCats } = buildExploreCuration(focus, categories);
+        const varietyClause = cleanFocus
+            ? `that are genuinely about "${cleanFocus}"`
+            : 'that would delight a curious wanderer — mix historical sites, natural features, cultural landmarks, and interesting oddities';
+
+        // Factor the zoom level into the search: a viewport showing most of a
+        // country is a "find the best across this whole region" request, not a
+        // "what's near this point" one. Size the ask (and how the model is told
+        // to spread its picks) to the span actually on screen rather than
+        // always anchoring on the centre coordinate.
+        const midLatRad = ((north + south) / 2) * Math.PI / 180;
+        const latSpanKm = Math.abs(north - south) * 111;
+        const lngSpanKm = Math.abs(east - west) * 111 * Math.max(Math.cos(midLatRad), 0.02);
+        const longSideKm = Math.max(latSpanKm, lngSpanKm);
+        const maxPlaces = longSideKm > 1500 ? 8 : longSideKm > 500 ? 7 : longSideKm > 150 ? 6 : 5;
+        const wideView = longSideKm > 150;
+        const areaLine = wideView
+            ? `That visible area is large — roughly ${Math.round(latSpanKm)} km north–south by ${Math.round(lngSpanKm)} km east–west, so it covers a whole region rather than a single locality.`
+            : `That visible area spans roughly ${Math.round(latSpanKm)} km north–south by ${Math.round(lngSpanKm)} km east–west, centred near ${lat}, ${lng}.`;
+        const spreadLine = wideView
+            ? `\n\nBecause this is a wide, zoomed-out view, do NOT cluster your picks near the centre point (${lat}, ${lng}). Choose the most remarkable places from ACROSS the entire visible area — different cities, provinces, and edges of the box — so the results represent the whole region on screen, not just its middle. If the single best example of what's wanted sits near an edge of the box, that's the one to return.`
+            : '';
+
+        const response = await anthropic.messages.create({
+            model: 'claude-haiku-4-5-20251001',
+            max_tokens: 900,
+            temperature: 1,
+            messages: [{
+                role: 'user',
+                content: `You are picking real points of interest for someone casually wandering an interactive map with no destination in mind. They're currently looking at the map area bounded by latitude ${south} to ${north} and longitude ${west} to ${east}. ${areaLine}${spreadLine}
+
+Name up to ${maxPlaces} real, specific, verifiable places inside (or very close to) that visible area ${varietyClause}. Only include places you're confident are real and can place accurately; skip a place entirely rather than guess at its coordinates. If you can't confidently find ${maxPlaces}, give fewer.${excludeBlock}${focusBlock}
+
+For each place give: its exact name, precise latitude/longitude (must fall within the given bounds), and a one-sentence hook (12–22 words, plain declarative statement of the single most interesting fact — never use the "X isn't just Y — it Z" contrast construction or variants like "not just blank, its blank"). ${categoryLine}
+
+Reply with ONLY a JSON array, nothing else — no preamble, no markdown fences:
+[{"name": "...", "lat": 0.0, "lng": 0.0, "teaser": "...", "category": "history"${focusMatchField}}]`
+            }],
+        });
+
+        const raw = response.content[0].text.trim();
+        const start = raw.indexOf('[');
+        const end = raw.lastIndexOf(']');
+        if (start === -1 || end === -1) throw new Error('No JSON array in response');
+        const parsed = JSON.parse(raw.slice(start, end + 1));
+
+        const CATEGORIES = new Set(['history', 'nature', 'culture', 'oddity']);
+        // Small, fixed-range tolerance for "very close to" the requested
+        // bounds — NOT proportional to the viewport itself. The old margin
+        // (a full extra viewport, floored at 0.5°) meant a zoomed-in view of
+        // e.g. Washington DC would still accept a pick ~35+ miles away (like
+        // Richmond, VA): the model would return something plausible-but-wrong
+        // for the neighborhood, it'd sail through validation, and fitBounds
+        // would then stretch the map to include it — reading as pins landing
+        // "between" the old and new area, or not at the new area at all.
+        // Clamping to a fixed 0.02°–0.15° (~1.5–10mi) range keeps the slack
+        // sane at every zoom level.
+        const latMargin = Math.min(Math.max((north - south) * 0.15, 0.02), 0.15);
+        const lngMargin = Math.min(Math.max((east - west) * 0.15, 0.02), 0.15);
+        const discoveries = parsed.filter(d =>
+            d && typeof d.name === 'string' && d.name.trim() &&
+            typeof d.lat === 'number' && typeof d.lng === 'number' &&
+            d.lat >= south - latMargin && d.lat <= north + latMargin &&
+            d.lng >= west - lngMargin && d.lng <= east + lngMargin &&
+            // Focus mode asks for a self-assessed "match" flag — drop anything
+            // the model itself wasn't willing to vouch for.
+            (!cleanFocus || d.match === true)
+        ).map(d => ({
+            name: d.name.trim(),
+            lat: d.lat,
+            lng: d.lng,
+            teaser: typeof d.teaser === 'string' ? d.teaser.trim() : '',
+            category: CATEGORIES.has(d.category) ? d.category : 'oddity',
+        })).filter(d => !allowedCats || allowedCats.includes(d.category));
+
+        res.json({ discoveries });
+    } catch (error) {
+        console.error('Error in /explore-nearby:', error.message);
+        res.status(500).json({ error: 'Failed to find nearby places', discoveries: [] });
+    }
+});
+
+// Follow-up places for the Explore detail panel — related to the given place
+// by history, theme, or story rather than by proximity, so (unlike
+// /explore-nearby) these are free to be anywhere on the map. Each one quick-
+// loads into the same lightweight detail view client-side; see
+// renderExploreFollowUps/quickLoadExploreFollowUp in js/main.js.
+app.post('/explore-related', async (req, res) => {
+    try {
+        const { name, teaser, exclude, focus, categories } = req.body || {};
+        if (typeof name !== 'string' || !name.trim()) {
+            return res.status(400).json({ error: 'Missing name', related: [] });
+        }
+        const excludeList = Array.isArray(exclude) ? exclude.filter(s => typeof s === 'string').slice(-40) : [];
+        const excludeBlock = excludeList.length
+            ? `\n\nSkip these — already shown to this person:\n${excludeList.map(n => `- ${n}`).join('\n')}`
+            : '';
+        // Same Explore "Curate" lens as /explore-nearby, but applied softly
+        // here — a themed "where to next" jump shouldn't be dropped just for
+        // sitting outside the chosen categories.
+        const { focusBlock, allowedCats } = buildExploreCuration(focus, categories);
+        const relatedPrefBlock = [
+            focusBlock,
+            allowedCats ? `\n\nWhere there's a genuine choice, lean toward places in these categories: ${allowedCats.join(', ')}.` : '',
+        ].join('');
+
+        const response = await anthropic.messages.create({
+            model: 'claude-haiku-4-5-20251001',
+            max_tokens: 700,
+            temperature: 1,
+            messages: [{
+                role: 'user',
+                content: `A curious wanderer just looked at this place on an interactive map:\n\nPlace: ${name}\n${teaser ? `Context: ${teaser}\n` : ''}\nSuggest up to 4 real, specific, verifiable places worth going to next — connected to this one by history, theme, story, or comparison (a related event, a shared figure, a counterpart elsewhere, the next chapter of the same story). They do NOT need to be nearby — anywhere in the world is fine, and scattering them geographically is good. Only include places you're confident are real and can place accurately; skip a place entirely rather than guess at its coordinates. If you can't confidently find 4, give fewer.${excludeBlock}${relatedPrefBlock}
+
+For each place give: its exact name, precise latitude/longitude, a one-sentence hook (12–22 words, plain declarative statement of the single most interesting fact and, where natural, how it connects back to "${name}" — never use the "X isn't just Y — it Z" contrast construction or variants like "not just blank, its blank"), and a category: exactly one of "history", "nature", "culture", "oddity".
+
+Reply with ONLY a JSON array, nothing else — no preamble, no markdown fences:
+[{"name": "...", "lat": 0.0, "lng": 0.0, "teaser": "...", "category": "history"}]`
+            }],
+        });
+
+        const raw = response.content[0].text.trim();
+        const start = raw.indexOf('[');
+        const end = raw.lastIndexOf(']');
+        if (start === -1 || end === -1) throw new Error('No JSON array in response');
+        const parsed = JSON.parse(raw.slice(start, end + 1));
+
+        const CATEGORIES = new Set(['history', 'nature', 'culture', 'oddity']);
+        const related = parsed.filter(d =>
+            d && typeof d.name === 'string' && d.name.trim() &&
+            typeof d.lat === 'number' && typeof d.lng === 'number' &&
+            d.lat >= -90 && d.lat <= 90 && d.lng >= -180 && d.lng <= 180 &&
+            d.name.trim().toLowerCase() !== name.trim().toLowerCase()
+        ).map(d => ({
+            name: d.name.trim(),
+            lat: d.lat,
+            lng: d.lng,
+            teaser: typeof d.teaser === 'string' ? d.teaser.trim() : '',
+            category: CATEGORIES.has(d.category) ? d.category : 'oddity',
+        }));
+
+        res.json({ related });
+    } catch (error) {
+        console.error('Error in /explore-related:', error.message);
+        res.status(500).json({ error: 'Failed to find related places', related: [] });
     }
 });
 

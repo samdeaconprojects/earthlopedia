@@ -178,7 +178,7 @@ body.theme-light {
 body {
     font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif;
     background: #0a0a0a;
-    color: #e0e0e0;
+    color: var(--text-primary);
     overflow: hidden;
 }
 
@@ -191,55 +191,61 @@ body {
 }
 
 
-/* ============== THEME TOGGLE ============== */
-#theme-toggle, #map-style-toggle {
-    flex-shrink: 0;
-    width: 36px;
-    height: 36px;
-    border-radius: 50%;
-    border: 1px solid var(--panel-border);
-    background: var(--panel-bg);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
-    color: var(--text-secondary);
-    font-size: 16px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    box-shadow: 0 2px 12px rgba(0,0,0,0.3);
-    transition: transform 0.15s, box-shadow 0.15s, border-color 0.15s;
-}
-#theme-toggle:hover, #map-style-toggle:hover {
-    transform: scale(1.1);
-    box-shadow: 0 4px 18px rgba(0,0,0,0.4);
-}
-
 /* ============== SETTINGS POPUP ============== */
+/* Gear docked to the search box's bottom-right corner (moved out of the
+   search row). Hidden unless the box is in its centered landing state —
+   result mode uses the top pill / top-right controls instead. */
 #settings-toggle {
-    flex-shrink: 0;
-    width: 36px;
-    height: 36px;
+    display: none;
+    position: absolute;
+    bottom: 12px;
+    right: 12px;
+    z-index: 401;
+    width: 34px;
+    height: 34px;
     border-radius: 50%;
     border: 1px solid var(--panel-border);
     background: var(--panel-bg);
     backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(20px);
     color: var(--text-secondary);
-    font-size: 16px;
+    font-size: 15px;
     cursor: pointer;
-    display: flex;
     align-items: center;
     justify-content: center;
     box-shadow: 0 2px 12px rgba(0,0,0,0.3);
     transition: transform 0.15s, box-shadow 0.15s, border-color 0.15s;
 }
+#questionBox.centered #settings-toggle { display: flex; }
 #settings-toggle:hover {
-    transform: scale(1.1) rotate(25deg);
+    transform: rotate(25deg);
     box-shadow: 0 4px 18px rgba(0,0,0,0.4);
 }
 #settings-toggle.active {
     color: var(--accent);
+    border-color: var(--accent);
+}
+
+/* Theme / map-style toggles — now rows inside the settings popup. Keep the
+   emoji glyph (swapped in JS: ☀️/🌙, 🗺️/🌙) but drop the floating-button
+   look for something that reads as an inline row control. */
+.settings-icon-btn {
+    flex-shrink: 0;
+    width: 34px;
+    height: 34px;
+    border-radius: 10px;
+    border: 1px solid var(--input-border);
+    background: var(--input-bg);
+    color: var(--text-secondary);
+    font-size: 15px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 0.15s, border-color 0.15s, background 0.15s;
+}
+.settings-icon-btn:hover {
+    transform: scale(1.06);
     border-color: var(--accent);
 }
 
@@ -527,6 +533,53 @@ body:has(#questionBox.result-mode:not(.searching)) .top-search-clear {
     background: var(--panel-bg);
 }
 
+/* "Back to Explore" — lives inside #questionBox now, mirroring
+   #cancelSearchBtn in the opposite (top-right) corner of the search box. Its
+   inline display (set by updateExploreNav in js/main.js) gates when it shows;
+   this is the look: same glass pill as .cancel-search-btn, widened for its
+   label since it's a mode switch, not a utility toggle. */
+.explore-return-btn {
+    position: absolute;
+    top: 14px;
+    right: 14px;
+    z-index: 300;
+    display: none;
+    align-items: center;
+    gap: 6px;
+    height: 36px;
+    padding: 0 14px;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1;
+    color: var(--back-btn-text);
+    background: var(--panel-bg);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid var(--back-btn-border);
+    border-radius: 999px;
+    cursor: pointer;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.3);
+    transition: transform 0.15s, box-shadow 0.15s, background 0.2s, color 0.2s;
+}
+.explore-return-btn:hover {
+    transform: scale(1.06);
+    box-shadow: 0 4px 18px rgba(0,0,0,0.4);
+    background: var(--chip-hover-bg);
+    color: var(--chip-hover-text);
+}
+.explore-return-btn .erb-label { letter-spacing: 0.02em; }
+/* The drag grip normally sits in this same top-right corner (top:6/right:8).
+   updateExploreNav only shows the Explore button on #questionBox.centered, so
+   only there does the grip need to step aside to its left. */
+#questionBox.centered .drag-handle { right: 122px; }
+@media (max-width: 700px) {
+    .explore-return-btn .erb-label { display: none; }
+    /* collapses to a 30px circle — see the shared sizing rule in the
+       mobile-stack block further down */
+    .explore-return-btn { padding: 0; justify-content: center; }
+    #questionBox.centered .drag-handle { right: 58px; }
+}
+
 /* ============== CLEAR-DISPLAY TOGGLE (peek at map) ============== */
 body.containers-hidden #questionBox,
 body.containers-hidden #timeline-container,
@@ -546,6 +599,630 @@ body.containers-hidden #cancelSearchBtn {
 body.containers-hidden #resetLayoutBtn {
     visibility: hidden;
     pointer-events: none;
+}
+
+/* ============== EXPLORE MODE ============== */
+/* Same panel set body.containers-hidden hides, plus the search pill itself
+   (#topSearchOuter) and its voice-control mirror (#topSearchActionsLeft) —
+   while exploring, #exploreBar takes over that same top-center real estate,
+   and hiding the pill means openSearch() can't be triggered invisibly
+   underneath it. #marker-popout is deliberately left out: showExplorePopout
+   reuses it for discovery cards. #topSearchActions stays visible too (its
+   hide-overlays / reset-layout icons apply over the explore detail panels). */
+body.explore-mode #questionBox,
+body.explore-mode #timeline-container,
+body.explore-mode #timeline-fade,
+body.explore-mode #currentImagePanel,
+body.explore-mode #backButton,
+body.explore-mode #cancelSearchBtn,
+body.explore-mode #summaryTitleBar,
+body.explore-mode #topSearchOuter,
+body.explore-mode #topSearchActionsLeft {
+    display: none !important;
+}
+/* The "hide overlays"/"reset layout" icons only mean something over a
+   result panel, and their own visibility rule (body:has(#questionBox.
+   result-mode)) only checks for that class, not whether it's on-screen — so
+   if explore mode was resumed with a result parked underneath they'd
+   otherwise still show up in the top-right corner. */
+body.explore-mode .top-search-clear {
+    display: none !important;
+}
+
+/* Always-on title chip hung under each explore discovery pin — see
+   buildExplorePinSvg/spawnDiscoveries in js/main.js. Google Maps renders the
+   marker label as a plain text span using this className, so background/
+   padding/truncation all have to come from here rather than the label's own
+   (very limited) text/color/fontSize/fontWeight options. pointer-events:none
+   keeps the chip from stealing the pin's own hover/click target. */
+.explore-pin-label {
+    display: inline-block;
+    max-width: 130px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    padding: 3px 8px;
+    border-radius: 8px;
+    background: rgba(15,17,23,0.82);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.35), inset 0 0 0 1px rgba(255,255,255,0.08);
+    letter-spacing: 0.01em;
+    pointer-events: none;
+}
+
+#exploreBar {
+    display: none;
+    position: fixed;
+    top: 16px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 200;
+    align-items: center;
+    /* Per-item margin-left (below) rather than `gap` so the divider /
+       typewriter / search icon can each collapse their spacing to 0 in the
+       brand-only intro state and animate it back open. */
+    gap: 0;
+    padding: 15px 22px 15px 24px;
+    border-radius: 20px;
+    background: var(--top-search-bg);
+    backdrop-filter: blur(24px) saturate(140%);
+    -webkit-backdrop-filter: blur(24px) saturate(140%);
+    border: 1px solid var(--top-search-border);
+    box-shadow: 0 4px 24px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.07);
+    white-space: nowrap;
+    overflow: hidden;
+    /* The whole bar opens search now (see onclick on #exploreBar) — same
+       "click anywhere" affordance as .top-search-main. */
+    cursor: pointer;
+}
+body.explore-mode #exploreBar { display: flex; }
+
+/* Always-on hero icon now (used to be swapped in only while a discovery
+   fetch was in flight, with a compass emoji shown at rest — see the
+   .explore-bar-icon span this replaced) — same loading motif as
+   #topLoadingIndicator's earth-logo-sm during a regular search, but here it
+   doubles as the bar's permanent "this is Earthlopedia" mark. The #exploreBar
+   prefix outweighs .earth-logo's own `display: inline-block` (equal-specificity
+   single-class selector that would otherwise win by appearing later). */
+#exploreBar .explore-bar-icon-globe { display: inline-block; flex-shrink: 0; }
+#exploreBar .explore-bar-icon-globe.earth-logo-sm { width: 30px; height: 30px; }
+.explore-bar-brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+}
+/* Same wordmark asset as .earth-title-wordmark on the search container,
+   just scaled to the bar's compact height instead of the landing hero. */
+.explore-bar-wordmark {
+    height: 21px;
+    width: auto;
+    display: block;
+}
+
+/* Thin rule between the brand lockup and the typed-out example search. */
+.explore-bar-divider {
+    flex-shrink: 0;
+    width: 1px;
+    height: 22px;
+    margin-left: 14px;
+    background: rgba(255, 255, 255, 0.16);
+    transition: width 0.55s cubic-bezier(0.22, 1, 0.36, 1),
+                margin-left 0.55s cubic-bezier(0.22, 1, 0.36, 1),
+                opacity 0.3s ease;
+}
+
+/* Fake "search field" placeholder: initExploreBarTypewriter cycles example
+   questions into .ebt-text one character at a time, with .ebt-caret blinking
+   after it. Fixed width (not flex) so the bar stays a steady size as the
+   text grows and shrinks; .ebt-text clips anything too long. */
+.explore-bar-typewriter {
+    flex: 0 0 auto;
+    width: min(44vw, 380px);
+    margin-left: 14px;
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    overflow: hidden;
+    font-size: 14px;
+    font-weight: 500;
+    letter-spacing: 0.01em;
+    color: rgba(255, 255, 255, 0.6);
+    transition: width 0.55s cubic-bezier(0.22, 1, 0.36, 1),
+                margin-left 0.55s cubic-bezier(0.22, 1, 0.36, 1),
+                opacity 0.35s ease 0.08s;
+}
+/* Intro state: the bar loads as just the globe + wordmark, then
+   initExploreBarTypewriter drops .brand-only after a beat and everything
+   past the brand slides open. */
+#exploreBar.brand-only .explore-bar-divider {
+    width: 0;
+    margin-left: 0;
+    opacity: 0;
+}
+#exploreBar.brand-only .explore-bar-typewriter {
+    width: 0;
+    margin-left: 0;
+    opacity: 0;
+}
+#exploreBar.brand-only .explore-bar-search-icon {
+    max-width: 0;
+    margin-left: 0;
+    opacity: 0;
+}
+.ebt-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.ebt-caret {
+    flex-shrink: 0;
+    display: inline-block;
+    width: 2px;
+    height: 1.05em;
+    margin-left: 3px;
+    background: var(--accent, #ff6b00);
+    animation: ebt-caret-blink 1s step-end infinite;
+}
+@keyframes ebt-caret-blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .ebt-caret { animation: none; }
+}
+/* When a live discovery status takes over the bar, drop the decorative
+   typed-search bits (mirrors the .explore-bar-wordmark hide just below). */
+#exploreBar.bar-status-visible .explore-bar-divider,
+#exploreBar.bar-status-visible .explore-bar-typewriter {
+    display: none;
+}
+/* Once the user has engaged Explore (opened Curate / ran a curated search),
+   the typed-example animation is retired for good — see
+   stopExploreBarTypewriter in js/main.js. The bar then rests on its wordmark
+   (or a live discovery status), never the fake search field again. */
+#exploreBar.typewriter-off .explore-bar-divider,
+#exploreBar.typewriter-off .explore-bar-typewriter {
+    display: none;
+}
+/* Kept in the DOM and updated live (see setExploreBarStatus in js/main.js).
+   At rest it's a visually-hidden clip — screen readers get the zoom-in
+   prompt, sighted users get the logo + search icon. But once there's
+   something actually happening (a discovery fetch in flight, a result
+   count, an error) setExploreBarStatus adds .bar-status-visible and this
+   text takes the wordmark's place — see the .bar-status-visible rules. */
+.explore-bar-status {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+/* Live-status state: swap the static "Earthlopedia" wordmark for the
+   status line itself ("Discovering near Ellicott, Colorado…", "5 places
+   near Kyoto, Japan", …). Un-clips
+   .explore-bar-status back into normal flow. The message is shown in full —
+   the bar grows to fit and wraps to a second line rather than truncating,
+   so a long place name or focus phrase stays readable. Colour stays
+   constant across the loading / settled states — the animated border strip
+   below is the only thing that changes while a fetch is in flight. */
+#exploreBar.bar-status-visible .explore-bar-wordmark { display: none; }
+#exploreBar.bar-status-visible .explore-bar-status {
+    position: static;
+    width: auto;
+    height: auto;
+    margin: 0;
+    clip: auto;
+    min-width: 0;
+    /* max-content width capped by max-width: short messages stay a tidy
+       single line, long ones grow the bar to the cap and then wrap. */
+    width: max-content;
+    max-width: min(72vw, 620px);
+    white-space: normal;
+    text-align: center;
+    line-height: 1.32;
+    font-size: 13px;
+    font-weight: 500;
+    letter-spacing: 0.01em;
+    color: rgba(255, 255, 255, 0.82);
+}
+/* Plain icon, no circle/border — same look as .top-search-edit in the
+   regular search pill, just brightening on hover of the whole bar rather
+   than being its own separate click target. */
+.explore-bar-search-icon {
+    flex-shrink: 0;
+    font-size: 15px;
+    line-height: 1;
+    color: rgba(255,255,255,0.4);
+    /* margin-left / max-left collapse for the .brand-only intro (see the
+       .explore-bar-search-icon block up near .explore-bar-typewriter). */
+    margin-left: 14px;
+    max-width: 40px;
+    overflow: hidden;
+    transition: color 0.15s,
+                max-width 0.55s cubic-bezier(0.22, 1, 0.36, 1),
+                margin-left 0.55s cubic-bezier(0.22, 1, 0.36, 1),
+                opacity 0.3s ease;
+}
+#exploreBar:hover .explore-bar-search-icon { color: rgba(255,255,255,0.75); }
+
+/* The bar's globe idles at a slow drift and speeds up to its normal spin
+   only while a discovery batch is being fetched — a subtler "working…"
+   tell than the old compass→spinner swap, reinforced by the border strip
+   below. Base duration (6s) comes from the generated .earth-logo /
+   .earth-logo-inner block; both the shade pulse and the surface scroll get
+   slowed together so they stay in step. */
+#exploreBar .earth-logo,
+#exploreBar .earth-logo-inner {
+    animation-duration: 24s;
+}
+#exploreBar.loading .earth-logo,
+#exploreBar.loading .earth-logo-inner {
+    animation-duration: 6s;
+}
+
+/* Sighted-user "fetching a batch" cue: an indeterminate strip along the
+   bar's bottom edge while spawnDiscoveries has .loading set (it also
+   updates #exploreBarStatus, shown in place of the wordmark — see the
+   .bar-status-visible rules — and for SR users). */
+#exploreBar.loading { overflow: hidden; }
+#exploreBar.loading::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 3px;
+    background: linear-gradient(90deg, transparent, var(--accent), transparent);
+    background-size: 45% 100%;
+    background-repeat: no-repeat;
+    filter: drop-shadow(0 0 4px var(--accent));
+    animation: explore-bar-loading 1.1s ease-in-out infinite;
+}
+@keyframes explore-bar-loading {
+    from { background-position: -40% 0; }
+    to { background-position: 140% 0; }
+}
+
+/* ---- Curate control (see #exploreCurate in index.html) ---- */
+#exploreCurate {
+    display: none;
+    position: fixed;
+    top: 74px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 199;
+    width: max-content;
+    max-width: calc(100vw - 24px);
+}
+body.explore-mode #exploreCurate { display: block; }
+/* The Explore detail panel opens its own top-center title bar — get the
+   curate pill out from under it while a discovery is being read. */
+body.explore-detail-open #exploreCurate { display: none; }
+
+.explore-curate-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    margin: 0 auto;
+    padding: 7px 14px;
+    max-width: 100%;
+    border-radius: 14px;
+    background: var(--top-search-bg);
+    backdrop-filter: blur(24px) saturate(140%);
+    -webkit-backdrop-filter: blur(24px) saturate(140%);
+    border: 1px solid var(--top-search-border);
+    box-shadow: 0 4px 18px rgba(0,0,0,0.2);
+    color: var(--text-primary);
+    font-size: 12.5px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+}
+.explore-curate-btn:hover { border-color: var(--accent); }
+.explore-curate-btn .ecb-icon { font-size: 12px; opacity: 0.65; flex-shrink: 0; }
+.explore-curate-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+/* Curation in effect: the button carries the active summary. */
+.explore-curate-btn.active {
+    border-color: var(--accent);
+    box-shadow: 0 4px 18px rgba(0,0,0,0.2), inset 0 0 0 1px var(--accent);
+}
+.explore-curate-btn.active .ecb-icon { opacity: 1; color: var(--accent); }
+
+.explore-curate-panel {
+    position: absolute;
+    top: calc(100% + 8px);
+    left: 50%;
+    transform: translateX(-50%);
+    width: 320px;
+    max-width: calc(100vw - 24px);
+    padding: 16px;
+    border-radius: 16px;
+    background: var(--panel-bg);
+    backdrop-filter: blur(28px) saturate(150%);
+    -webkit-backdrop-filter: blur(28px) saturate(150%);
+    border: 1px solid var(--top-search-border);
+    box-shadow: 0 12px 40px rgba(0,0,0,0.32);
+    color: var(--text-primary);
+}
+.ecp-section + .ecp-section { margin-top: 14px; }
+.ecp-heading {
+    display: block;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    opacity: 0.6;
+    margin-bottom: 7px;
+}
+.ecp-focus-input {
+    width: 100%;
+    padding: 9px 11px;
+    border-radius: 10px;
+    border: 1px solid var(--top-search-border);
+    background: rgba(255,255,255,0.06);
+    color: var(--text-primary);
+    font-size: 13px;
+    font-family: inherit;
+}
+.ecp-focus-input:focus { outline: none; border-color: var(--accent); }
+.ecp-hint { font-size: 11px; opacity: 0.55; margin-top: 5px; }
+.ecp-cats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+.ecp-cat {
+    padding: 6px 11px;
+    border-radius: 999px;
+    border: 1px solid var(--top-search-border);
+    background: transparent;
+    color: var(--text-primary);
+    font-size: 12px;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+    opacity: 0.5;
+    transition: opacity 0.12s, border-color 0.12s, background 0.12s;
+}
+.ecp-cat.selected {
+    opacity: 1;
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+.ecp-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 16px;
+}
+.ecp-clear, .ecp-apply {
+    padding: 8px 16px;
+    border-radius: 10px;
+    font-size: 12.5px;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+    border: 1px solid var(--top-search-border);
+}
+.ecp-clear { background: transparent; color: var(--text-primary); }
+.ecp-apply { background: var(--accent); border-color: var(--accent); color: #fff; }
+.ecp-clear:hover { border-color: var(--accent); }
+.ecp-apply:hover { filter: brightness(1.08); }
+
+/* ============== EXPLORE DETAIL PANELS ============== */
+/* Opened by clicking a discovery pin — see openExploreDetail in js/main.js.
+   Three separate panels positioned exactly like #summaryTitleBar (title bar,
+   top-center), #questionBox (summary well, left) and #currentImagePanel
+   (images, right) so explore mode's "pull up the view" card reads as the
+   same info-card layout the rest of the app uses — but they're wholly
+   separate elements so they never touch a real search result that might be
+   sitting hidden underneath explore mode. The street view thumbnail reuses
+   #loc-streetview-slot itself (see positionStreetViewSlot/checkStreetView in
+   js/main.js), which docks under whichever image panel is currently active. */
+.explore-detail-titlebar,
+.explore-detail-summary-panel,
+.explore-detail-image-panel {
+    display: none;
+    position: fixed;
+    z-index: 190;
+    background: var(--panel-bg);
+    backdrop-filter: blur(28px) saturate(160%);
+    -webkit-backdrop-filter: blur(28px) saturate(160%);
+    border: 1px solid var(--panel-border);
+    box-shadow: var(--panel-shadow);
+}
+.explore-detail-titlebar.visible,
+.explore-detail-summary-panel.visible {
+    display: block;
+}
+
+/* The image panel is hidden via opacity rather than display:none — same
+   trick as #currentImagePanel — so it keeps a real (if invisible) layout
+   position for positionStreetViewSlot() to anchor the street view thumbnail
+   against even when no image was found (see openExploreDetail in
+   js/main.js, which only adds .visible here once an image actually loads). */
+.explore-detail-image-panel {
+    display: block;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.35s ease;
+}
+.explore-detail-image-panel.visible {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.explore-detail-titlebar {
+    top: 78px;
+    left: 50%;
+    transform: translateX(-50%);
+    /* Hugs its content (title/coords text) instead of always claiming a
+       full 440px, so short place names don't sit in a sea of empty
+       left/right padding — but still caps out at the old max so long
+       names wrap the same as before. */
+    width: fit-content;
+    max-width: min(440px, calc(100vw - 32px));
+    min-width: 200px;
+    padding: 12px 40px 14px;
+    border-radius: 18px;
+    text-align: center;
+}
+.explore-detail-close {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+}
+.explore-detail-category {
+    display: block;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #22d3ee;
+    margin-bottom: 4px;
+}
+.explore-detail-titlebar .loc-focus-title {
+    font-size: 22px;
+}
+.explore-detail-titlebar .loc-focus-coords {
+    margin-top: 6px;
+}
+
+.explore-detail-summary-panel {
+    top: 78px;
+    left: 24px;
+    width: 320px;
+    max-height: calc(100vh - 98px);
+    overflow-y: auto;
+    padding: 16px;
+    border-radius: 20px;
+    /* Extra-glassy, matching #questionBox, rather than the flatter
+       --panel-bg the title/image panels above share. */
+    background: var(--top-search-bg);
+    border-color: var(--top-search-border);
+    backdrop-filter: blur(40px) saturate(180%);
+    -webkit-backdrop-filter: blur(40px) saturate(180%);
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+.explore-detail-summary-panel::-webkit-scrollbar { width: 4px; }
+.explore-detail-summary-panel::-webkit-scrollbar-track { background: transparent; }
+.explore-detail-summary-panel::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 2px; }
+.explore-detail-summary {
+    margin-top: 0;
+}
+/* Matches the #answer-scoped rule this class normally relies on for its
+   bold-text accent color, so key terms still stand out in this panel too. */
+.explore-detail-summary-panel .loc-focus-summary strong {
+    font-weight: 700;
+    color: var(--accent-light);
+}
+.explore-detail-deepdive-btn {
+    width: 100%;
+    margin: 16px 0 0;
+}
+
+.explore-detail-image-panel {
+    top: 78px;
+    right: 24px;
+    width: 320px;
+    max-height: calc(100vh - 96px);
+    overflow-y: auto;
+    padding: 10px;
+    border-radius: 16px;
+}
+.explore-detail-image-panel::-webkit-scrollbar { width: 4px; }
+.explore-detail-image-panel::-webkit-scrollbar-track { background: transparent; }
+.explore-detail-image-panel::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 2px; }
+
+.explore-detail-similar {
+    margin-top: 18px;
+    padding-top: 14px;
+    border-top: 1px solid var(--top-search-border);
+}
+.explore-detail-similar:empty,
+.explore-detail-similar:has(#edpSimilarList:empty) {
+    display: none;
+}
+.explore-detail-similar-label {
+    font-size: 12px;
+    font-weight: 700;
+    opacity: 0.7;
+    margin-bottom: 10px;
+}
+.explore-detail-similar-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.explore-similar-card {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    width: 100%;
+    padding: 10px;
+    border-radius: 12px;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid var(--top-search-border);
+    cursor: pointer;
+    text-align: left;
+    color: inherit;
+    font: inherit;
+    transition: background 0.15s, transform 0.15s;
+}
+.explore-similar-card:hover {
+    background: rgba(34,211,238,0.1);
+    transform: translateY(-1px);
+}
+.explore-similar-card-emoji { font-size: 18px; flex-shrink: 0; line-height: 1.3; }
+.explore-similar-card-text { min-width: 0; }
+.explore-similar-card-name {
+    display: block;
+    font-weight: 700;
+    font-size: 13px;
+    margin-bottom: 2px;
+}
+.explore-similar-card-teaser {
+    display: block;
+    font-size: 11.5px;
+    opacity: 0.75;
+    line-height: 1.35;
+}
+.explore-followups-loading {
+    font-size: 12.5px;
+    opacity: 0.6;
+    font-style: italic;
+    padding: 2px 0;
+}
+
+/* Sits under the teaser in #edpSummary while the full /location-summary
+   write-up is still loading. */
+.edp-summary-loading {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top: 1px solid var(--panel-border);
+}
+.edp-summary-loading .loading-dots span {
+    width: 5px;
+    height: 5px;
+}
+.edp-summary-loading-label {
+    font-size: 12px;
+    opacity: 0.6;
+    font-style: italic;
 }
 
 /* ============== DRAGGABLE PANELS ============== */
@@ -653,7 +1330,6 @@ body:has(#questionBox.centered) #resetLayoutBtn {
     right: auto;
     transform: translateX(-50%);
 }
-
 /* ============== TOP LOADING INDICATOR ============== */
 #topLoadingIndicator {
     display: flex;
@@ -686,13 +1362,6 @@ body:has(#questionBox.centered) #resetLayoutBtn {
     flex-direction: column;
     gap: 2px;
     min-width: 0;
-}
-
-.loading-eta {
-    font-size: 11px;
-    color: var(--loading-label);
-    letter-spacing: 0.02em;
-    opacity: 0.75;
 }
 
 /* ============== ANSWER HERO ============== */
@@ -842,9 +1511,22 @@ body.theme-light .answer-hero p {
     transition: top 0.5s cubic-bezier(0.4,0,0.2,1),
                 left 0.5s cubic-bezier(0.4,0,0.2,1),
                 width 0.5s cubic-bezier(0.4,0,0.2,1),
-                transform 0.5s cubic-bezier(0.4,0,0.2,1),
+                transform 0.42s cubic-bezier(0.4,0,0.2,1),
                 max-height 0.5s cubic-bezier(0.4,0,0.2,1),
-                border-radius 0.5s cubic-bezier(0.4,0,0.2,1);
+                border-radius 0.5s cubic-bezier(0.4,0,0.2,1),
+                opacity 0.26s ease;
+}
+
+/* Opened over / dismissed back to the Explore map via the Explore bar. The
+   container doesn't dock anywhere in Explore mode, so there's no off-screen
+   position to slide from — it fades and scales in place instead. Toggled by
+   exploreSearchInstead() / cancelSearch() in js/main.js. */
+#questionBox.qb-fade { opacity: 0; }
+#questionBox.centered.qb-fade { transform: translate(-50%, -50%) scale(0.965); }
+/* Mobile centers the box with left/right insets, not a translate — keep the
+   scale but drop the translate so it doesn't jump off-center mid-fade. */
+@media (max-width: 700px) {
+    #questionBox.centered.qb-fade { transform: scale(0.965); }
 }
 
 /* Centered landing state */
@@ -866,6 +1548,7 @@ body.theme-light .answer-hero p {
 /* In result mode: hide the search row (top pill handles re-searching) */
 #questionBox.result-mode .search-row { display: none !important; }
 #questionBox.result-mode .earth-title { display: none !important; }
+#questionBox.result-mode .landing-pane { display: none !important; }
 
 /* Hide panel while search is in flight */
 #questionBox.searching { opacity: 0; pointer-events: none; }
@@ -1077,8 +1760,16 @@ body.mobile-sheet-expanded .mobile-sheet-toggle { transform: rotate(180deg); }
     flex-shrink: 0;
 }
 /* margin-top: auto pushes the disclaimer to the bottom of the flex column
-   (#questionBox.centered) regardless of how tall the panel is resized to. */
-#questionBox.centered .search-disclaimer { display: block; margin-top: auto; padding-top: 16px; }
+   (#questionBox.centered) regardless of how tall the panel is resized to.
+   Symmetric side padding keeps the centered text clear of the settings gear
+   docked in the bottom-right corner. */
+#questionBox.centered .search-disclaimer {
+    display: block;
+    margin-top: auto;
+    padding-top: 16px;
+    padding-left: 46px;
+    padding-right: 46px;
+}
 #questionBox.centered #landingSuggestions { min-height: 0; overflow-y: auto; }
 
 /* ============== SUGGESTION CHIPS ============== */
@@ -1275,6 +1966,7 @@ body.mobile-sheet-expanded .mobile-sheet-toggle { transform: rotate(180deg); }
     height: 46px;
     width: auto;
     display: block;
+    transition: height 0.2s ease;
 }
 
 /* GLOBE:START — generated by tools/globe-editor.html, do not hand-edit between markers */
@@ -1332,6 +2024,7 @@ body.mobile-sheet-expanded .mobile-sheet-toggle { transform: rotate(180deg); }
 #questionBox::-webkit-scrollbar-track { background: transparent; }
 #questionBox::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 2px; }
 
+/* ============== LANDING TABS (Search / Explore) ============== */
 /* ============== SEARCH ROW ============== */
 .search-row {
     position: relative;
@@ -1479,6 +2172,10 @@ body.mobile-sheet-expanded .mobile-sheet-toggle { transform: rotate(180deg); }
     background: var(--chip-hover-bg);
     color: var(--chip-hover-text);
 }
+/* When "back" from the search box lands in Explore rather than a prior
+   result, the button wears the compass (set as textContent by
+   updateExploreNav) — nudge the glyph size so the emoji sits like the "←". */
+.cancel-search-btn.to-explore { font-size: 16px; }
 
 /* ============== DISPLAYED QUESTION / SUMMARY TITLE ============== */
 .summary-title {
@@ -2043,6 +2740,17 @@ body:has(#questionBox.loc-focused) .loc-header-block { display: block; }
     text-decoration: underline;
 }
 
+.fact-check-note {
+    font-size: 11px;
+    line-height: 1.4;
+    color: rgba(251, 191, 36, 0.95);
+    background: rgba(251, 191, 36, 0.1);
+    border: 1px solid rgba(251, 191, 36, 0.25);
+    border-radius: 8px;
+    padding: 7px 10px;
+    margin-top: 10px;
+}
+
 .related-section {
     margin-top: 16px;
     padding-top: 14px;
@@ -2316,8 +3024,23 @@ body:has(#questionBox.loc-focused) .loc-header-block { display: block; }
     transform: translate(-50%, calc(-100% - 28px));
     animation: popout-in 0.2s cubic-bezier(0.34,1.56,0.64,1);
     pointer-events: auto;
+    cursor: pointer;
 }
 #marker-popout.visible { display: block; }
+#marker-popout:focus-visible {
+    outline: 2px solid rgba(var(--accent-rgb), 0.9);
+    outline-offset: 2px;
+}
+/* Whole card is the click target now (no "Full story" button) — nudge the
+   image toward the accent tint on hover so it reads as actionable. */
+#marker-popout:hover .mp-img-wrap { background: rgba(var(--accent-rgb), 0.12); }
+/* Anchor point sits too close to the top of the viewport for the card to
+   open upward without being clipped — flip it to open downward instead.
+   Toggled from JS (positionMarkerPopout) based on the anchor's screen y. */
+#marker-popout.flip-down {
+    transform: translate(-50%, 28px);
+    animation-name: popout-in-down;
+}
 
 .mp-close {
     position: absolute;
@@ -2346,6 +3069,14 @@ body:has(#questionBox.loc-focused) .loc-header-block { display: block; }
     from { opacity: 0; transform: translate(-50%, calc(-100% - 20px)) scale(0.92); }
     to   { opacity: 1; transform: translate(-50%, calc(-100% - 28px)) scale(1); }
 }
+@keyframes popout-in-down {
+    from { opacity: 0; transform: translate(-50%, 20px) scale(0.92); }
+    to   { opacity: 1; transform: translate(-50%, 28px) scale(1); }
+}
+
+/* No image found for this place — drop the empty image box entirely and let
+   the card be text-only rather than showing a blank placeholder panel. */
+#marker-popout.no-img .mp-img-wrap { display: none; }
 
 .mp-img-wrap {
     position: relative;
@@ -2402,7 +3133,7 @@ body:has(#questionBox.loc-focused) .loc-header-block { display: block; }
 }
 
 .mp-body {
-    padding: 10px 13px 6px;
+    padding: 10px 13px 12px;
 }
 .mp-name {
     font-size: 14px;
@@ -2480,25 +3211,60 @@ body:has(#questionBox.loc-focused) .loc-header-block { display: block; }
 @media (max-width: 700px) {
     /* The 25% inset that pulls these in toward center on desktop would
        collide with the narrower pill here — pin them back to the edges. */
-    #topSearchActions { right: 16px; }
+    #topSearchActions { right: 16px; gap: 7px; }
     #topSearchActionsLeft { left: 16px; }
+    /* Panels are edge-pinned on mobile (see the width rule below), so
+       reset-layout has little to do — drop it to keep the row uncluttered. */
+    #resetLayoutBtn { display: none !important; }
+    .explore-return-btn, .top-search-clear { width: 30px; height: 30px; }
 
     #topSearchWrapper {
         min-width: 0;
-        max-width: calc(100vw - 100px);
+        /* Leaves room for the icon clusters either side (voice controls left,
+           hide-overlays right) so a long query pill can't slide under
+           them — the full query still shows in the title bar. */
+        max-width: calc(100vw - 168px);
     }
+
+    #exploreBar {
+        max-width: calc(100vw - 24px);
+        gap: 0;
+        padding: 12px 14px 12px 16px;
+    }
+    #exploreBar .explore-bar-icon-globe.earth-logo-sm { width: 24px; height: 24px; }
+    .explore-bar-wordmark { height: 16px; }
+    .explore-bar-divider { height: 18px; margin-left: 10px; }
+    .explore-bar-typewriter {
+        flex: 1 1 auto;
+        width: auto;
+        max-width: 200px;
+        margin-left: 10px;
+        font-size: 12.5px;
+    }
+    .explore-bar-search-icon { margin-left: 10px; }
+    #exploreBar.brand-only .explore-bar-typewriter { flex-basis: 0; }
+    #exploreBar.bar-status-visible .explore-bar-status {
+        max-width: calc(100vw - 96px);
+    }
+
+    #exploreCurate { top: 62px; }
+    .explore-curate-panel { width: calc(100vw - 20px); }
 
     #questionBox,
     #questionBox.centered,
     #summaryTitleBar,
-    #currentImagePanel {
+    #currentImagePanel,
+    .explore-detail-titlebar,
+    .explore-detail-summary-panel,
+    .explore-detail-image-panel {
         left: 10px;
         right: 10px;
         width: auto;
         transform: none;
     }
 
-    #summaryTitleBar { top: 66px; }
+    #summaryTitleBar,
+    .explore-detail-titlebar { top: 66px; }
     .mobile-sheet-toggle { display: flex; }
 
     #questionBox.centered {

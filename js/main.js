@@ -5,7 +5,7 @@ let statesStack = [];
 const RANDOM_QUESTIONS = [
     "Trace every stop on Marco Polo's 24-year journey from Venice to Beijing",
     "Map all the ports Columbus visited across his four voyages to the Americas",
-    "Show the exact route Magellan's crew took to circumnavigate the globe",
+    "Show the route Magellan's crew took to circumnavigate the globe",
     "Where did the first humans travel as they spread out of Africa over 70,000 years?",
     "Trace Vasco da Gama's sea route from Portugal around Africa to India",
     "Map every Greek colony founded around the Mediterranean Sea",
@@ -86,7 +86,7 @@ const RANDOM_QUESTIONS = [
 // favored as landing-page suggestion chips over the general random pool.
 const FAVORITE_QUESTIONS = [
     "Trace every stop on Marco Polo's 24-year journey from Venice to Beijing",
-    "Show the exact route Magellan's crew took to circumnavigate the globe",
+    "Show the route Magellan's crew took to circumnavigate the globe",
     "Map exactly where the Black Death spread year by year from 1347 to 1353",
     "Show every battle Alexander the Great fought across three continents",
     "Trace the Lewis and Clark expedition from St. Louis to the Pacific",
@@ -461,6 +461,134 @@ const _COMPARE_B = [
     "the Oyo Empire",
 ];
 // PROMPTS:END
+
+// Short, punchy example searches typed out one at a time in the explore bar's
+// fake "search field" placeholder — see initExploreBarTypewriter. Kept
+// separate from RANDOM_QUESTIONS (whose entries run long) so the bar's width
+// stays sensible while each one types in.
+const EXPLORE_BAR_PROMPTS = [
+    "Trace the Silk Road from Rome to Chang'an",
+    "Map every battle Napoleon lost",
+    "Where did the Black Death spread, year by year?",
+    "Follow Magellan's crew around the globe",
+    "Show every Viking settlement in the North Atlantic",
+    "Journey along the Pacific Ring of Fire",
+    "Map Zheng He's seven treasure voyages",
+    "Where did humans first spread out of Africa?",
+    "Trace Marco Polo's route from Venice to Beijing",
+    "Show the Roman Empire at its greatest extent",
+    "Map all five D-Day beach landings",
+    "How did the Sahara turn from savanna to desert?",
+];
+
+// Types the EXPLORE_BAR_PROMPTS through #exploreBarTypewriter forever: type a
+// line in, hold, delete it, move to the next. Pauses itself whenever the bar
+// is showing a live discovery status instead (.bar-status-visible) or explore
+// mode isn't active, so a half-typed line never freezes on screen.
+// How long the bar sits as just the globe + wordmark on load before it
+// widens out to the full search bar (see the .brand-only CSS).
+const EXPLORE_BAR_REVEAL_DELAY = 2500;
+
+// The typed-out example questions are a load-in flourish only — once the user
+// has actually engaged Explore (opened Curate, ran a curated search), retire
+// the animation for good and let the bar settle to its wordmark / live-status
+// resting state. See stopExploreBarTypewriter callers.
+let exploreBarTypewriterStopped = false;
+// The example question the bar is currently typing out / holding on screen.
+// Clicking the bar to open search carries this into the search field so the
+// click acts on whatever the user was just reading (see exploreSearchInstead).
+let exploreBarCurrentPhrase = '';
+function stopExploreBarTypewriter() {
+    if (exploreBarTypewriterStopped) return;
+    exploreBarTypewriterStopped = true;
+    const bar = document.getElementById('exploreBar');
+    bar?.classList.remove('brand-only');
+    bar?.classList.add('typewriter-off');
+    const textEl = document.querySelector('#exploreBarTypewriter .ebt-text');
+    if (textEl) textEl.textContent = '';
+}
+
+function initExploreBarTypewriter() {
+    const bar = document.getElementById('exploreBar');
+    const wrap = document.getElementById('exploreBarTypewriter');
+    const textEl = wrap && wrap.querySelector('.ebt-text');
+    if (!bar || !textEl) return;
+
+    const order = [...EXPLORE_BAR_PROMPTS].sort(() => Math.random() - 0.5);
+    const reduceMotion = window.matchMedia
+        && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    let idx = 0;
+
+    // Drop .brand-only after the intro beat so the bar animates open. The
+    // typewriter itself only starts once that widen transition has finished.
+    const reveal = (then) => {
+        if (!bar.classList.contains('brand-only')) { then(); return; }
+        setTimeout(() => {
+            bar.classList.remove('brand-only');
+            setTimeout(then, 650);
+        }, EXPLORE_BAR_REVEAL_DELAY);
+    };
+
+    if (reduceMotion) {
+        // No per-character animation — just rotate the full line every few
+        // seconds so the caret still has something to sit after.
+        reveal(() => {
+            if (exploreBarTypewriterStopped) return;
+            textEl.textContent = order[0];
+            exploreBarCurrentPhrase = order[0];
+            const rotator = setInterval(() => {
+                if (exploreBarTypewriterStopped) { clearInterval(rotator); return; }
+                idx = (idx + 1) % order.length;
+                textEl.textContent = order[idx];
+                exploreBarCurrentPhrase = order[idx];
+            }, 4500);
+        });
+        return;
+    }
+
+    const barHidden = () => {
+        const bar = document.getElementById('exploreBar');
+        return !bar
+            || !document.body.classList.contains('explore-mode')
+            || bar.classList.contains('bar-status-visible');
+    };
+
+    let phrase = order[0];
+    let pos = 0;
+    let deleting = false;
+    exploreBarCurrentPhrase = phrase;
+
+    const tick = () => {
+        if (exploreBarTypewriterStopped) return;
+        exploreBarCurrentPhrase = phrase;
+        // Bar's busy showing a real status — wait, don't advance the text.
+        if (barHidden()) { setTimeout(tick, 500); return; }
+
+        if (!deleting) {
+            pos++;
+            textEl.textContent = phrase.slice(0, pos);
+            if (pos >= phrase.length) {
+                deleting = true;
+                setTimeout(tick, 1900);
+                return;
+            }
+            setTimeout(tick, 28 + Math.random() * 32);
+        } else {
+            pos--;
+            textEl.textContent = phrase.slice(0, pos);
+            if (pos <= 0) {
+                deleting = false;
+                idx = (idx + 1) % order.length;
+                phrase = order[idx];
+                setTimeout(tick, 320);
+                return;
+            }
+            setTimeout(tick, 24);
+        }
+    };
+
+    reveal(() => setTimeout(tick, 250));
+}
 
 function _pickComparePair() {
     const a = _COMPARE_A[Math.floor(Math.random() * _COMPARE_A.length)];
@@ -1156,14 +1284,30 @@ function toggleSettingsPopup(e) {
     const opening = popup.style.display === 'none';
     if (opening) {
         // Popup is a fixed, top-level element (kept outside #questionBox so
-        // its overflow-y:auto scroll container doesn't clip it) — position
-        // it under the gear button each time it opens.
+        // its overflow-y:auto scroll container doesn't clip it). Render it
+        // hidden first so its real size is known, then place it near the gear
+        // — below by default, flipped above when there's no room (the gear now
+        // sits low, in the search box's bottom-right corner).
+        popup.style.visibility = 'hidden';
+        popup.style.display = 'flex';
         const rect = btn.getBoundingClientRect();
-        const popupWidth = 260;
-        popup.style.top = (rect.bottom + 10) + 'px';
-        popup.style.left = Math.max(8, rect.right - popupWidth) + 'px';
+        const pw = popup.offsetWidth || 260;
+        const ph = popup.offsetHeight || 300;
+        const margin = 8;
+        let left = Math.min(
+            Math.max(margin, rect.right - pw),
+            window.innerWidth - pw - margin
+        );
+        let top = rect.bottom + 10;
+        if (top + ph > window.innerHeight - margin) {
+            top = Math.max(margin, rect.top - ph - 10);
+        }
+        popup.style.left = left + 'px';
+        popup.style.top = top + 'px';
+        popup.style.visibility = '';
+    } else {
+        popup.style.display = 'none';
     }
-    popup.style.display = opening ? 'flex' : 'none';
     btn.classList.toggle('active', opening);
 }
 document.addEventListener('click', (e) => {
@@ -1174,7 +1318,28 @@ document.addEventListener('click', (e) => {
     popup.style.display = 'none';
     if (btn) btn.classList.remove('active');
 });
+// Clicking off the open search landing panel acts like its back arrow: if
+// there's a saved result or a paused explore map behind it (see
+// cancelSearch/resumeExploreMode), clicking the map outside the box returns
+// to it instead of leaving the box stranded open with nothing to do.
+document.addEventListener('click', (e) => {
+    const qb = document.getElementById('questionBox');
+    if (!qb || !qb.classList.contains('centered') || qb.classList.contains('searching')) return;
+    if (!_savedResultState && !exploreWasActiveBeforeSearch) return;
+    if (qb.contains(e.target)) return;
+    // Also ignore the controls that open/reopen the box in the first place
+    // (the top search pill, the explore bar's search button) — a click on
+    // those is what got us into this state, not a click "outside" it, and
+    // without this it would immediately undo the openSearch()/
+    // exploreSearchInstead() call the same click just triggered.
+    if (e.target.closest('#topSearchOuter, #exploreBar, #settingsPopup')) return;
+    cancelSearch();
+});
 document.addEventListener('DOMContentLoaded', initSettingsUI);
+// Runs off DOMContentLoaded (not initMap) so the "just the logo, then widen"
+// intro is timed from page load rather than from whenever the Maps script
+// finishes loading.
+document.addEventListener('DOMContentLoaded', initExploreBarTypewriter);
 // Re-check the day/night schedule periodically so the theme keeps up while
 // the app is left open across the evening threshold.
 setInterval(applyAutoDarkMode, 5 * 60 * 1000);
@@ -1223,8 +1388,12 @@ function initMap() {
                 closeStreetViewModal();
                 return;
             }
+            if (exploreDetailDiscovery) {
+                closeExploreDetail();
+                return;
+            }
             const qb = document.getElementById('questionBox');
-            if (qb.classList.contains('centered') && _savedResultState) {
+            if (qb.classList.contains('centered') && (_savedResultState || exploreWasActiveBeforeSearch)) {
                 cancelSearch();
                 return;
             }
@@ -1253,8 +1422,26 @@ function initMap() {
         }
     });
 
+    // Keeps the shared #marker-popout open while the cursor is travelling
+    // from a pin up onto the card itself (the whole card is clickable to open
+    // the location) — see scheduleHideMarkerPopout/hideMarkerPopout.
+    const markerPopoutEl = document.getElementById('marker-popout');
+    if (markerPopoutEl) {
+        markerPopoutEl.addEventListener('mouseenter', () => {
+            if (popoutHideTimer) { clearTimeout(popoutHideTimer); popoutHideTimer = null; }
+        });
+        markerPopoutEl.addEventListener('mouseleave', scheduleHideMarkerPopout);
+    }
+
     initLandingSuggestions();
     initDetailSlider();
+
+    // Default landing experience: open straight into Explore mode (free
+    // pan/zoom discovery) instead of the search landing box — see
+    // body.explore-mode in index.html, which already starts applied so
+    // there's no flash of the old landing box while the Maps script loads.
+    // This just wires up the JS-side listener/state now that `map` exists.
+    enterExploreMode();
 }
 
 // Remaining functions remain the same...
@@ -2208,6 +2395,12 @@ function openSearch() {
         };
         document.getElementById('cancelSearchBtn').style.display = 'flex';
     }
+    // Arrived here via exploreSearchInstead(): there's no prior result to
+    // restore, but there is a paused explore map — show the same back arrow
+    // so it isn't a dead end (see cancelSearch/resumeExploreMode).
+    if (exploreWasActiveBeforeSearch) {
+        document.getElementById('cancelSearchBtn').style.display = 'flex';
+    }
 
     hideTimeline();
     qb.classList.remove('result-mode');
@@ -2215,45 +2408,73 @@ function openSearch() {
     document.getElementById('topSearchWrapper').classList.remove('visible');
     hideCurrentImage();
     setTimeout(() => document.getElementById('questionInput').focus(), 300);
+    updateExploreNav();
 }
 
 function cancelSearch() {
-    if (!_savedResultState) return;
-    const qb = document.getElementById('questionBox');
-    qb.classList.remove('centered');
-    qb.classList.add('result-mode');
-    document.getElementById('topSearchWrapper').classList.add('visible');
-    document.getElementById('answer').innerHTML = _savedResultState.answerHTML;
-    document.getElementById('displayedQuestion').innerText = _savedResultState.displayedQuestion;
-    document.getElementById('questionInput').value = _savedResultState.inputValue;
-    document.querySelector('.collapsible-content').innerHTML = _savedResultState.locationsHTML;
-    document.getElementById('voiceControls').style.display = _savedResultState.voiceControlsDisplay;
-    document.getElementById('topSearchQuery').textContent = _savedResultState.topSearchQuery || '';
-    if (_savedResultState.savedLocations) activeLocations = _savedResultState.savedLocations;
-    if ('focusedIndex' in _savedResultState) currentFocusedIndex = _savedResultState.focusedIndex;
-    updateTimelineNav();
-    renderHeaderState();
-    topicImageUrl = _savedResultState.topicImageUrl || null;
-    topicExtraImages = _savedResultState.topicExtraImages || [];
-    topicImageDesc = _savedResultState.topicImageDesc || null;
-    if (topicImageUrl) {
-        setCurrentImage(topicImageUrl, topicExtraImages, topicImageDesc);
+    if (_savedResultState) {
+        const qb = document.getElementById('questionBox');
+        qb.classList.remove('centered');
+        qb.classList.add('result-mode');
+        document.getElementById('topSearchWrapper').classList.add('visible');
+        document.getElementById('answer').innerHTML = _savedResultState.answerHTML;
+        document.getElementById('displayedQuestion').innerText = _savedResultState.displayedQuestion;
+        document.getElementById('questionInput').value = _savedResultState.inputValue;
+        document.querySelector('.collapsible-content').innerHTML = _savedResultState.locationsHTML;
+        document.getElementById('voiceControls').style.display = _savedResultState.voiceControlsDisplay;
+        document.getElementById('topSearchQuery').textContent = _savedResultState.topSearchQuery || '';
+        if (_savedResultState.savedLocations) activeLocations = _savedResultState.savedLocations;
+        if ('focusedIndex' in _savedResultState) currentFocusedIndex = _savedResultState.focusedIndex;
+        updateTimelineNav();
+        renderHeaderState();
+        topicImageUrl = _savedResultState.topicImageUrl || null;
+        topicExtraImages = _savedResultState.topicExtraImages || [];
+        topicImageDesc = _savedResultState.topicImageDesc || null;
+        if (topicImageUrl) {
+            setCurrentImage(topicImageUrl, topicExtraImages, topicImageDesc);
+        } else {
+            hideCurrentImage();
+        }
+        if (_savedResultState.timelineWasVisible) showTimeline();
+        _savedResultState = null;
+    } else if (exploreWasActiveBeforeSearch) {
+        // Fade + scale the container out over the Explore map before actually
+        // switching back (resumeExploreMode hard-hides it via body.explore-mode).
+        const qb = document.getElementById('questionBox');
+        document.getElementById('cancelSearchBtn').style.display = 'none';
+        if (qb) {
+            qb.classList.add('qb-fade');
+            setTimeout(() => { qb.classList.remove('qb-fade'); resumeExploreMode(); updateExploreNav(); }, 240);
+        } else {
+            resumeExploreMode();
+            updateExploreNav();
+        }
+        return;
     } else {
-        hideCurrentImage();
+        return;
     }
-    if (_savedResultState.timelineWasVisible) showTimeline();
     document.getElementById('cancelSearchBtn').style.display = 'none';
-    _savedResultState = null;
+    updateExploreNav();
 }
 
 function toggleClearDisplay() {
     const hidden = document.body.classList.toggle('containers-hidden');
     document.getElementById('topSearchClearBtn').classList.toggle('active', hidden);
+    updateExploreNav();
 }
 
 async function askQuestion() {
     _savedResultState = null;
+    document.getElementById('questionBox')?.classList.remove('qb-fade');
+    // A real search means there's no going back to the paused explore map —
+    // drop its now-orphaned (hidden) pins rather than leaving them in memory
+    // forever unshown.
+    if (exploreWasActiveBeforeSearch) {
+        exploreWasActiveBeforeSearch = false;
+        clearExploreMarkers();
+    }
     document.getElementById('cancelSearchBtn').style.display = 'none';
+    updateExploreNav();
     document.body.classList.remove('containers-hidden');
     document.getElementById('topSearchClearBtn').classList.remove('active');
     // On mobile, a fresh search should land with the map visible rather
@@ -2318,7 +2539,7 @@ async function askQuestion() {
     renderHeaderState();
     resetMapView();
 
-    loadingLabel.textContent = "Searching the archives…";
+    loadingLabel.textContent = "Searching… Est. 20–40 seconds";
 
     let streamBuffer = '';
     const ghost = document.getElementById('stream-ghost');
@@ -2359,6 +2580,7 @@ async function askQuestion() {
     if (statesStack.length > 0) {
         document.getElementById("backButton").style.display = "flex";
     }
+    updateExploreNav();
 }
 
 
@@ -2576,33 +2798,55 @@ async function fetchWikipediaImage(query) {
     return { imageUrl: result.imageUrl, articleUrl: result.articleUrl, extract: result.extract };
 }
 
+// Memoizes fetchWikipediaImage per discovery object (caching the in-flight
+// promise, not just the result, so calls that race each other share one
+// fetch) — the marker pin thumbnail, the hover popout, and the detail panel
+// all want the same discovery's image, and without this each would issue
+// its own redundant Wikipedia lookup.
+function getDiscoveryImageInfo(discovery) {
+    if (!discovery._imageInfoPromise) discovery._imageInfoPromise = fetchWikipediaImage(discovery.name);
+    return discovery._imageInfoPromise;
+}
+
 async function fetchLocationImage(location) {
     const [title, ...descParts] = (location.name || '').split('—');
     const place = title.split(',')[0].trim();
     const desc = descParts.join('—').trim();
+
+    // The location carries the map coordinates the model placed it at. Pass
+    // them as a disambiguation hint so a bare place name like "Acre" resolves
+    // to the city near those coords rather than to a same-named article (the
+    // unit of land area, a Brazilian state, ...) that opensearch ranks first.
+    const near = (typeof location.lat === 'number' && typeof location.lng === 'number')
+        ? { lat: location.lat, lng: location.lng }
+        : null;
 
     const queries = [];
     if (desc) {
         // Prefer specific names inside parentheses, e.g. "(Eoraptor, Herrerasaurus)"
         const parenMatch = desc.match(/\(([^)]+)\)/);
         if (parenMatch) {
-            parenMatch[1].split(',').forEach(s => { const t = s.trim(); if (t) queries.push(t); });
+            parenMatch[1].split(',').forEach(s => { const t = s.trim(); if (t) queries.push({ q: t }); });
         }
         // Also try the event text without parens
         const cleanDesc = desc.replace(/\([^)]*\)/g, '').trim();
-        if (cleanDesc) queries.push(cleanDesc);
+        if (cleanDesc) queries.push({ q: cleanDesc });
     }
-    queries.push(place);
+    queries.push({ q: place, near });
 
-    for (const q of queries) {
-        const result = await fetchWikipediaSummary(q);
+    for (const { q, near: qNear } of queries) {
+        const result = await fetchWikipediaSummary(q, { near: qNear });
         if (result.imageUrl) return result;
     }
     return { imageUrl: null, articleUrl: null, extract: null };
 }
 
-async function fetchWikipediaSummary(query) {
+async function fetchWikipediaSummary(query, opts = {}) {
     const STOP_WORDS = new Set(['the', 'a', 'an', 'of', 'in', 'on', 'at', 'to', 'for', 'and', 'or', 'why', 'did', 'how', 'where', 'what', 'is', 'was', 'were', 'i', 'want', 'me', 'show', 'tell', 'find', 'get', 'give']);
+    const near = opts.near && typeof opts.near.lat === 'number' && typeof opts.near.lng === 'number' ? opts.near : null;
+    // Max degrees between a candidate article's own coordinates and the hinted
+    // location before we stop trusting it as the same place (~220 km).
+    const NEAR_LIMIT_DEG = 2;
 
     async function summaryForTitle(title) {
         const res = await fetch(`https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`);
@@ -2612,8 +2856,33 @@ async function fetchWikipediaSummary(query) {
         const src = data.thumbnail?.source || data.originalimage?.source;
         const articleUrl = data.content_urls?.desktop?.page || null;
         const extract = data.extract || null;
-        if (src || articleUrl || extract) return { imageUrl: src || null, articleUrl, extract };
+        const coords = data.coordinates && typeof data.coordinates.lat === 'number'
+            ? { lat: data.coordinates.lat, lng: data.coordinates.lon }
+            : null;
+        if (src || articleUrl || extract) return { imageUrl: src || null, articleUrl, extract, coords };
         return null;
+    }
+
+    // With a coordinate hint, resolve the whole candidate list and prefer the
+    // one whose article sits near the hinted spot. Falls back to first-match
+    // when no candidate has usable nearby coordinates (species, events, etc.).
+    async function pickFromTitles(titles) {
+        if (!near) {
+            for (const title of titles) {
+                const result = await summaryForTitle(title);
+                if (result) return result;
+            }
+            return null;
+        }
+        const results = (await Promise.all(titles.map(summaryForTitle))).filter(Boolean);
+        let best = null, bestDist = Infinity;
+        for (const r of results) {
+            if (!r.coords) continue;
+            const d = Math.hypot(r.coords.lat - near.lat, r.coords.lng - near.lng);
+            if (d < bestDist) { best = r; bestDist = d; }
+        }
+        if (best && bestDist <= NEAR_LIMIT_DEG) return best;
+        return results.find(r => r.imageUrl) || results[0] || null;
     }
 
     try {
@@ -2623,10 +2892,8 @@ async function fetchWikipediaSummary(query) {
         const searchRes = await fetch(`https://en.wikipedia.org/w/api.php?action=opensearch&search=${encodeURIComponent(q)}&limit=3&format=json&origin=*`);
         if (searchRes.ok) {
             const [, titles] = await searchRes.json();
-            for (const title of titles) {
-                const result = await summaryForTitle(title);
-                if (result) return result;
-            }
+            const result = await pickFromTitles(titles);
+            if (result) return result;
         }
 
         // Fallback: strip leading stop/filler words and try direct page lookup
@@ -2639,10 +2906,8 @@ async function fetchWikipediaSummary(query) {
         const candidates = [...new Set([stripped, coreWords.slice(0, 4).join(' '), coreWords.slice(0, 3).join(' ')])
         ].filter(c => c.length > 2 && !STOP_WORDS.has(c.toLowerCase()));
 
-        for (const candidate of candidates) {
-            const result = await summaryForTitle(candidate);
-            if (result) return result;
-        }
+        const fallback = await pickFromTitles(candidates);
+        if (fallback) return fallback;
 
         return { imageUrl: null, articleUrl: null, extract: null };
     } catch {
@@ -2687,6 +2952,24 @@ async function fetchQuestion(question, onChunk) {
         }
         pump();
     });
+}
+
+// Fire-and-forget cross-check of the summary's opening claim against the
+// Wikipedia extract already on hand. Returns null on any failure so callers
+// can just no-op — this is a soft enhancement, never something to block or
+// error the main answer over.
+async function factCheckOverview(summary, extract) {
+    try {
+        const res = await fetch('/fact-check', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ summary, extract }),
+        });
+        if (!res.ok) return null;
+        return await res.json();
+    } catch {
+        return null;
+    }
 }
 
 function parseLocations(answer) {
@@ -2807,6 +3090,170 @@ let playbackActive = false;
 let playbackTimeouts = [];
 let playbackHighlightIndex = null;
 let activeShading = null;
+
+// ============== EXPLORE MODE ==============
+// A lightweight overlay on top of the map, independent of the search/
+// activeLocations system above — see enterExploreMode()/exitExploreMode() and
+// friends further down. It's the app's permanent ground state: the app opens
+// here and the search container (#questionBox) sits over it, returning here on
+// close. Clicking a discovery pin opens the explore detail panels (#edpTitleBar/
+// #edpSummaryPanel/#edpImagePanel — title/info/images, like the normal
+// per-location view) via openExploreDetail(); only its explicit "Full search
+// deep dive" button hands off to the normal search pipeline (askQuestion),
+// via diveIntoDiscovery().
+let exploreModeActive = false;
+let exploreMarkers = [];
+let exploreDiscoveries = [];       // current batch, index-aligned with exploreMarkers
+let exploreShownNames = [];        // capped history, sent to the server as `exclude`
+let exploreIdleListener = null;
+let exploreFetchInFlight = false;
+let explorePendingRecheck = false; // set when the map moved during an in-flight fetch; the fetch's
+                                   // finally reschedules a check so the new viewport gets its own batch
+let exploreLastBounds = null;      // {n,s,e,w} of the bounds last fetched for
+let activeExploreDiscovery = null; // set while #marker-popout is showing a discovery, not a search location
+let exploreDetailDiscovery = null; // the discovery the explore detail panels currently show, if open
+let exploreDetailRequestId = 0;    // bumped on every openExploreDetail call to void stale async writes
+let exploreWasActiveBeforeSearch = false; // set by exploreSearchInstead(); tells the search box's
+                                           // back arrow (and an outside click) to resume Explore
+                                           // instead of just closing, see resumeExploreMode()
+let exploreSuppressAutoFetchUntil = 0;    // Date.now() ms threshold; set by quickLoadExploreFollowUp so
+                                           // its own programmatic pan/zoom doesn't trigger the normal
+                                           // "wander nearby" auto-fetch, which would close the panel it
+                                           // just opened — see exploreOnIdle
+let exploreEntryZoom = null;              // map zoom captured when explore mode was entered
+let exploreFirstFetchDone = false;        // false until the session's first discovery batch fires — see
+                                           // exploreOnIdle, where it relaxes the zoom floor so the very
+                                           // first zoom-in (any step past exploreEntryZoom) spawns pins
+const EXPLORE_MIN_ZOOM = 6;
+// Relaxed floor for that first batch only: once the user has zoomed in at all
+// from the landing view, don't make them keep zooming to hit EXPLORE_MIN_ZOOM.
+const EXPLORE_FIRST_FETCH_MIN_ZOOM = 4;
+const EXPLORE_CATEGORY_EMOJI = { history: '🏛️', nature: '🌿', culture: '🎨', oddity: '✨' };
+const EXPLORE_CATEGORY_LABEL = { history: 'History', nature: 'Nature', culture: 'Culture', oddity: 'Oddity' };
+// One color per category so pins stand out from each other at a glance.
+// Reuses the same four accent presets Settings offers (see ACCENT_PRESETS)
+// rather than inventing a second palette — four categories, four presets.
+const EXPLORE_CATEGORY_COLOR = {
+    history: ACCENT_PRESETS.orange.accent,
+    nature: ACCENT_PRESETS.green.accent,
+    culture: ACCENT_PRESETS.purple.accent,
+    oddity: ACCENT_PRESETS.blue.accent,
+};
+const EXPLORE_ALL_CATEGORIES = ['history', 'nature', 'culture', 'oddity'];
+
+// ---- Explore curation ----
+// User-set lens on what the discovery batches surface: a free-text interest
+// (biases the model prompt in /explore-nearby + /explore-related) and/or a
+// subset of the four categories (sent to the server AND enforced client-side
+// in exploreDiscoveryMatchesCuration, since the model doesn't always obey).
+// Both are edited in #exploreCuratePanel and take effect on Apply, which
+// wipes the current pins and re-fetches through the new lens.
+let exploreFocus = '';
+let exploreCurateCats = new Set(EXPLORE_ALL_CATEGORIES);
+
+// A category set of "all four" (or somehow none) is no constraint at all.
+function exploreCatsConstrained() {
+    return exploreCurateCats.size > 0 && exploreCurateCats.size < EXPLORE_ALL_CATEGORIES.length;
+}
+function exploreCurationActive() {
+    return !!exploreFocus || exploreCatsConstrained();
+}
+// null when unconstrained — callers send nothing to the server in that case.
+function exploreCurationCategoriesParam() {
+    return exploreCatsConstrained() ? [...exploreCurateCats] : null;
+}
+function exploreDiscoveryMatchesCuration(discovery) {
+    if (!exploreCatsConstrained()) return true;
+    return exploreCurateCats.has(discovery.category);
+}
+
+// Short summary shown on the collapsed curate button ("Curate" when nothing
+// is set, otherwise the focus text and/or category count).
+function exploreCurateSummary() {
+    const parts = [];
+    if (exploreFocus) parts.push(`“${exploreFocus}”`);
+    if (exploreCatsConstrained()) {
+        parts.push(exploreCurateCats.size === 1
+            ? EXPLORE_CATEGORY_LABEL[[...exploreCurateCats][0]]
+            : `${exploreCurateCats.size} categories`);
+    }
+    return parts.length ? parts.join(' · ') : 'Curate';
+}
+
+// Push current state into the panel controls + the collapsed button.
+function syncExploreCurateUI() {
+    const input = document.getElementById('exploreFocusInput');
+    if (input && document.activeElement !== input) input.value = exploreFocus;
+    document.querySelectorAll('#exploreCuratePanel .ecp-cat').forEach(btn => {
+        btn.classList.toggle('selected', exploreCurateCats.has(btn.dataset.cat));
+    });
+    const btn = document.getElementById('exploreCurateBtn');
+    const label = document.getElementById('exploreCurateLabel');
+    if (label) label.textContent = exploreCurateSummary();
+    if (btn) {
+        btn.classList.toggle('active', exploreCurationActive());
+        btn.title = exploreCurationActive()
+            ? `Explore is focused — ${exploreCurateSummary()}`
+            : 'Curate what Explore surfaces';
+    }
+}
+
+function toggleExploreCuratePanel(event) {
+    if (event) event.stopPropagation();
+    const panel = document.getElementById('exploreCuratePanel');
+    const btn = document.getElementById('exploreCurateBtn');
+    if (!panel) return;
+    const open = panel.style.display === 'none';
+    panel.style.display = open ? 'block' : 'none';
+    btn?.setAttribute('aria-expanded', open ? 'true' : 'false');
+    if (open) {
+        stopExploreBarTypewriter();   // real engagement — retire the load-in animation
+        syncExploreCurateUI();
+        document.getElementById('exploreFocusInput')?.focus();
+    }
+}
+
+function closeExploreCuratePanel() {
+    const panel = document.getElementById('exploreCuratePanel');
+    if (panel) panel.style.display = 'none';
+    document.getElementById('exploreCurateBtn')?.setAttribute('aria-expanded', 'false');
+}
+
+function toggleExploreCurateCat(btn) {
+    const cat = btn.dataset.cat;
+    if (exploreCurateCats.has(cat)) exploreCurateCats.delete(cat);
+    else exploreCurateCats.add(cat);
+    btn.classList.toggle('selected', exploreCurateCats.has(cat));
+}
+
+// Re-run discovery through the current lens: read the panel, stash state,
+// then wipe the accumulated pins and re-fetch for whatever's on screen.
+function applyExploreCuration() {
+    const input = document.getElementById('exploreFocusInput');
+    exploreFocus = input ? input.value.trim().slice(0, 120) : exploreFocus;
+    // Deselecting every category means "no preference", same as all four.
+    if (exploreCurateCats.size === 0) exploreCurateCats = new Set(EXPLORE_ALL_CATEGORIES);
+    stopExploreBarTypewriter();
+    syncExploreCurateUI();
+    closeExploreCuratePanel();
+    if (exploreModeActive) resetExploreDiscoveries();
+}
+
+function clearExploreCuration() {
+    exploreFocus = '';
+    exploreCurateCats = new Set(EXPLORE_ALL_CATEGORIES);
+    syncExploreCurateUI();
+    closeExploreCuratePanel();
+    if (exploreModeActive) resetExploreDiscoveries();
+}
+
+// Close the curate panel on any outside click (it sits over the live map).
+document.addEventListener('click', (e) => {
+    const wrap = document.getElementById('exploreCurate');
+    const panel = document.getElementById('exploreCuratePanel');
+    if (!wrap || !panel || panel.style.display === 'none') return;
+    if (!wrap.contains(e.target)) closeExploreCuratePanel();
+});
 
 // Splits a location's "Name — event description" string, and formats its
 // year/coords for display. Shared by the header and the marker popout.
@@ -3083,16 +3530,19 @@ function focusLocation(location, index) {
     document.getElementById("backButton").style.display = "flex";
     map.panTo({ lat: location.lat, lng: location.lng });
     smoothZoom(getLocationZoom());
-    checkStreetView(location, index);
+    checkStreetView(location.lat, location.lng, () => currentFocusedIndex !== index);
 }
 
 // #loc-streetview-slot is a standalone fixed panel, not a child of
-// #currentImagePanel, so it doesn't read as one more photo in that grid —
-// this keeps it docked directly under that panel regardless of where it
-// currently sits (including if the user has dragged it elsewhere).
+// #currentImagePanel/#edpImagePanel, so it doesn't read as one more photo in
+// that grid — this keeps it docked directly under whichever of those two
+// image panels is currently active (the explore detail one while a discovery
+// is open, the normal one otherwise), regardless of where that panel
+// currently sits (including if the user has dragged #currentImagePanel
+// elsewhere).
 function positionStreetViewSlot() {
     const slot = document.getElementById('loc-streetview-slot');
-    const imgPanel = document.getElementById('currentImagePanel');
+    const imgPanel = document.getElementById(exploreDetailDiscovery ? 'edpImagePanel' : 'currentImagePanel');
     if (!slot || !imgPanel) return;
     const rect = imgPanel.getBoundingClientRect();
     slot.style.left = rect.left + 'px';
@@ -3101,13 +3551,15 @@ function positionStreetViewSlot() {
     slot.style.right = 'auto';
 }
 
-// Looks up whether real Street View coverage exists near this location and,
-// if so, drops a small non-interactive thumbnail into its own panel below
-// the images — most historical/remote locations have no coverage, so this
-// stays silent rather than showing a "no imagery" placeholder. Guarded
-// against the user having already moved on to another location by the time
-// the lookup resolves.
-function checkStreetView(location, index) {
+// Looks up whether real Street View coverage exists near the given
+// coordinates and, if so, drops a small non-interactive thumbnail into its
+// own panel below the images — most historical/remote locations have no
+// coverage, so this stays silent rather than showing a "no imagery"
+// placeholder. `isStale()` is checked after the (async) lookup resolves so a
+// slower response can't overwrite the panel once the user has moved on to
+// another location or discovery — see the callers (focusLocation,
+// openExploreDetail) for what each one checks.
+function checkStreetView(lat, lng, isStale) {
     const slot = document.getElementById('loc-streetview-slot');
     if (!slot) return;
     slot.style.display = 'none';
@@ -3116,11 +3568,11 @@ function checkStreetView(location, index) {
     if (!streetViewService) return;
 
     streetViewService.getPanorama({
-        location: { lat: location.lat, lng: location.lng },
+        location: { lat, lng },
         radius: 50,
         source: google.maps.StreetViewSource.OUTDOOR,
     }, (data, status) => {
-        if (currentFocusedIndex !== index) return;
+        if (isStale()) return;
         if (status !== google.maps.StreetViewStatus.OK || !data || !data.location) return;
 
         const pano = data.location.pano;
@@ -3147,7 +3599,10 @@ function checkStreetView(location, index) {
             motionTracking: false,
             motionTrackingControl: false,
         });
-        slot.addEventListener('click', () => openStreetViewModal(pano));
+        // Plain onclick (not addEventListener) so re-running checkStreetView
+        // for a new location/discovery replaces the handler instead of
+        // stacking another one on top of it.
+        slot.onclick = () => openStreetViewModal(pano);
     });
 }
 
@@ -3259,6 +3714,850 @@ function clearMap() {
     activeShading = null;
     hideMarkerPopout();
     hideCompareLegend();
+}
+
+// Keeps the two "get (back) into Explore" affordances in sync with the
+// current state, called from every search/explore transition:
+//
+//   • #cancelSearchBtn (the search container's back arrow) — when it would
+//     land the user back in Explore (they opened the search box straight
+//     from Explore and nothing else is stacked behind it), it wears the
+//     compass glyph instead of a plain "←" so the destination is obvious.
+//   • #exploreReturnBtn — the "Explore" pill in the search container's
+//     top-right corner. Only shown while that container is the centered
+//     search box (not a result view, not mid-search) and the back arrow
+//     isn't already the compass itself.
+function updateExploreNav() {
+    const inExplore = document.body.classList.contains('explore-mode');
+    const cancelBtn = document.getElementById('cancelSearchBtn');
+    const cancelVisible = !!cancelBtn && cancelBtn.style.display !== 'none';
+    const backLeadsToExplore = cancelVisible && exploreWasActiveBeforeSearch && !_savedResultState;
+
+    if (cancelBtn) {
+        cancelBtn.classList.toggle('to-explore', backLeadsToExplore);
+        cancelBtn.textContent = backLeadsToExplore ? '\u{1F9ED}' : '←';
+        cancelBtn.title = backLeadsToExplore ? 'Back to Explore' : 'Back';
+    }
+
+    const returnBtn = document.getElementById('exploreReturnBtn');
+    if (returnBtn) {
+        const qb = document.getElementById('questionBox');
+        const show = !inExplore && !backLeadsToExplore
+            && !!qb && qb.classList.contains('centered')
+            && !qb.classList.contains('searching')
+            && !document.body.classList.contains('containers-hidden');
+        returnBtn.style.display = show ? 'flex' : 'none';
+    }
+}
+
+// ============== EXPLORE MODE ==============
+// Ambient wandering layer: pan/zoom the map with no topic in mind and a
+// handful of nearby real places quietly appear (see spawnDiscoveries). It's
+// deliberately independent of the search/activeLocations system above — the
+// only hand-off point is diveIntoDiscovery(), which exits explore mode and
+// runs a normal search via askQuestion(), reusing that entire pipeline
+// (summary, timeline, images, and the existing "Explore further" related
+// chips) instead of building a second content system.
+
+function enterExploreMode() {
+    if (exploreModeActive) return;
+    exploreModeActive = true;
+    hideMarkerPopout();
+
+    // Hide (don't clear) any current search result's pins/routes so they're
+    // not fighting the discovery pins for attention while wandering — exiting
+    // explore mode without diving into anything brings them straight back.
+    activeMarkers.forEach(m => m.setMap(null));
+    activePolylines.forEach(p => p.setMap(null));
+
+    document.body.classList.add('explore-mode');
+    syncExploreCurateUI();
+
+    // #loc-streetview-slot is a standalone fixed element, not a child of any
+    // of the panels the CSS above hides — hide it explicitly so a real
+    // focused location's thumbnail doesn't keep floating over the map while
+    // exploring. exitExploreMode() rebuilds it fresh for whatever's still
+    // focused once explore mode ends.
+    const enterSvSlot = document.getElementById('loc-streetview-slot');
+    if (enterSvSlot) { enterSvSlot.style.display = 'none'; enterSvSlot.innerHTML = ''; }
+    locStreetViewPano = null;
+
+    // "Let them pan first": stay right where the map already is — no forced
+    // zoom, no recenter. exploreOnIdle() below will just report that they
+    // need to zoom/pan in until they actually do, so entering explore mode
+    // never itself triggers a spawn at whatever the map's resting spot is.
+    // But once they *do* zoom in — even a single step — the first batch
+    // fires without waiting for EXPLORE_MIN_ZOOM (see exploreOnIdle).
+    exploreLastBounds = null;
+    exploreEntryZoom = map.getZoom();
+    exploreFirstFetchDone = false;
+    // bounds_changed + a manual debounce, rather than the Maps API's own
+    // 'idle' event — bounds_changed is a low-level event that fires
+    // reliably and immediately on every pan/zoom step (including
+    // programmatic ones like the setZoom above), whereas 'idle' waits on
+    // Maps' own tile-load heuristics and was observed to sometimes not fire
+    // at all after a purely programmatic zoom. Debouncing ourselves also
+    // naturally coalesces a whole drag/zoom gesture into one check.
+    exploreIdleListener = map.addListener('bounds_changed', scheduleExploreCheck);
+    scheduleExploreCheck(true);
+    updateExploreNav();
+}
+
+function exitExploreMode({ skipMarkerRestore = false, preserveDiscoveries = false } = {}) {
+    if (!exploreModeActive) return;
+    exploreModeActive = false;
+
+    if (exploreIdleListener) {
+        google.maps.event.removeListener(exploreIdleListener);
+        exploreIdleListener = null;
+    }
+    if (exploreDebounceTimer) { clearTimeout(exploreDebounceTimer); exploreDebounceTimer = null; }
+    exploreFetchInFlight = false;
+    document.getElementById('exploreBar')?.classList.remove('loading', 'bar-status-visible');
+    // exploreSearchInstead() passes preserveDiscoveries so the discovered
+    // batch is just hidden, not thrown away — resumeExploreMode() re-shows
+    // the same markers instead of the map coming back empty.
+    if (preserveDiscoveries) {
+        exploreMarkers.forEach(m => m.setMap(null));
+    } else {
+        clearExploreMarkers();
+    }
+    if (activeExploreDiscovery) hideMarkerPopout();
+    closeExploreDetail();
+    closeExploreCuratePanel();
+
+    // Rebuild the real focused location's street view thumbnail, since
+    // enterExploreMode() hid it above and a discovery's own street view may
+    // have overwritten it entirely along the way (see closeExploreDetail).
+    if (currentFocusedIndex !== null) {
+        const exitFocusedIndex = currentFocusedIndex;
+        const exitFocusedLoc = activeLocations[exitFocusedIndex - 1];
+        if (exitFocusedLoc) {
+            checkStreetView(exitFocusedLoc.lat, exitFocusedLoc.lng, () => currentFocusedIndex !== exitFocusedIndex);
+        }
+    }
+
+    document.body.classList.remove('explore-mode');
+
+    // #questionBox starts with no "centered"/"result-mode" class now that
+    // Explore is the default landing state (see body.explore-mode in
+    // index.html) — every other path onto/off of it always pairs an add
+    // with a remove, but exiting Explore this way (the ✕ button, or the
+    // header toggle) is the one place that can reveal it for the first time
+    // with neither class set. Fall back to the blank landing view rather
+    // than showing it in an unstyled, half-configured state.
+    const qbAfterExplore = document.getElementById('questionBox');
+    if (qbAfterExplore && !qbAfterExplore.classList.contains('centered') && !qbAfterExplore.classList.contains('result-mode')) {
+        qbAfterExplore.classList.add('centered');
+    }
+
+    // Skipped when diving into a discovery — askQuestion() is about to call
+    // clearMap() anyway, so restoring these first would just be thrown away.
+    if (!skipMarkerRestore) {
+        activeMarkers.forEach(m => m.setMap(map));
+        activePolylines.forEach(p => p.setMap(map));
+    }
+    updateExploreNav();
+}
+
+function exploreSearchInstead() {
+    exploreWasActiveBeforeSearch = true;
+    exitExploreMode({ preserveDiscoveries: true });
+    // exitExploreMode un-hides #questionBox (display:none under
+    // body.explore-mode) already at its .centered spot. There's no docked
+    // position to slide up from in Explore mode, so fade + scale it in on the
+    // spot instead: paint one frame invisible/small (.qb-fade), then drop the
+    // class so it eases to full size. See the .qb-fade CSS.
+    const qb = document.getElementById('questionBox');
+    if (qb) {
+        qb.classList.add('qb-fade');
+        void qb.offsetWidth;
+    }
+    openSearch();
+    if (qb) requestAnimationFrame(() => requestAnimationFrame(() => qb.classList.remove('qb-fade')));
+    updateExploreNav();
+    // Pre-fill the search field with the example the bar was typing out, so
+    // clicking the bar acts on what the user was reading. Selected (not just
+    // placed) so a keystroke replaces it and Enter runs it as-is. Only when
+    // the typed-example animation is actually running (see
+    // stopExploreBarTypewriter) and there's a phrase to carry.
+    if (!exploreBarTypewriterStopped && exploreBarCurrentPhrase) {
+        const input = document.getElementById('questionInput');
+        if (input) {
+            input.value = exploreBarCurrentPhrase;
+            const phrase = exploreBarCurrentPhrase;
+            // openSearch() focuses the input on a 300ms delay; re-assert the
+            // selection just after so the fill lands highlighted, not
+            // caret-at-end or cleared by the focus.
+            setTimeout(() => {
+                if (input.value === phrase) input.select();
+            }, 340);
+        }
+    }
+}
+
+// Undoes exploreSearchInstead(): brings the paused discovery pins (hidden,
+// not cleared, by exitExploreMode's preserveDiscoveries above) back onto the
+// map and resumes listening for pan/zoom — without going through
+// enterExploreMode(), which would reset exploreLastBounds/exploreShownNames
+// and force an immediate re-fetch as if exploring had just started.
+function resumeExploreMode() {
+    exploreWasActiveBeforeSearch = false;
+    if (exploreModeActive) return;
+    exploreModeActive = true;
+
+    const qb = document.getElementById('questionBox');
+    qb.classList.remove('centered', 'result-mode');
+    document.getElementById('topSearchWrapper')?.classList.remove('visible');
+
+    // Drop an unrun example that exploreSearchInstead() pre-filled — the user
+    // backed out without searching it, so it shouldn't sit in the box next time.
+    const resumeInput = document.getElementById('questionInput');
+    if (resumeInput && resumeInput.value === exploreBarCurrentPhrase) resumeInput.value = '';
+
+    exploreMarkers.forEach(m => m.setMap(map));
+    document.body.classList.add('explore-mode');
+    syncExploreCurateUI();
+    // Resuming after a search — if anything was already discovered, the
+    // relaxed first-fetch zoom floor no longer applies.
+    exploreEntryZoom = map.getZoom();
+    exploreFirstFetchDone = exploreMarkers.length > 0 || exploreShownNames.length > 0;
+    exploreIdleListener = map.addListener('bounds_changed', scheduleExploreCheck);
+    updateExploreNav();
+}
+
+function clearExploreMarkers() {
+    exploreMarkers.forEach(m => m.setMap(null));
+    exploreMarkers = [];
+    exploreDiscoveries = [];
+    exploreRelatedCache = {};
+}
+
+// The explicit "start over" action — discovery pins otherwise persist across
+// pans/zooms (see spawnDiscoveries), so this is the only way to wipe the
+// accumulated set. Also resets the exclude history so previously-seen places
+// can resurface, then immediately re-fetches for whatever's on screen right
+// now. No dedicated button currently calls this (#exploreBar dropped its
+// reset button to stay compact) — kept as a callable primitive in case a
+// future control needs it.
+function resetExploreDiscoveries() {
+    if (!exploreModeActive) return;
+    closeExploreDetail();
+    clearExploreMarkers();
+    exploreShownNames = [];
+    exploreLastBounds = null;
+    setExploreBarStatus('Pan or zoom to discover places', { idle: true });
+    scheduleExploreCheck(true);
+}
+
+// Updates the explore bar's status line. `idle` states (the "pan/zoom in to
+// discover" prompts, shown when there's nothing to report) keep the line
+// screen-reader-only and leave the "Earthlopedia" wordmark showing; anything
+// else (a fetch in flight, a result count, an error) adds .bar-status-visible
+// so the text takes the wordmark's place for sighted users too.
+function setExploreBarStatus(text, { idle = false } = {}) {
+    const el = document.getElementById('exploreBarStatus');
+    if (el) el.textContent = text;
+    document.getElementById('exploreBar')?.classList.toggle('bar-status-visible', !idle);
+}
+
+// Human label for whatever's near the map center right now ("Ellicott,
+// Colorado", "Kyoto, Japan", "Patagonia, Argentina") — folded into the
+// explore bar's status line so a discovery fetch reads as "Discovering near
+// Ellicott, Colorado…" rather than a bare "Discovering nearby…". Reverse-
+// geocoded on demand and cached; refreshed each time a new batch is fetched
+// (see spawnDiscoveries). Empty string whenever geocoding is unavailable or
+// hasn't resolved yet, and every caller falls back to the place-less
+// wording in that case.
+let exploreCenterPlace = '';
+let exploreGeocoder = null;
+let exploreGeocodeToken = 0;
+
+// Turns a reverse-geocode result set into a "Place, Context" label: the most
+// specific name available (town → county → region → country) plus one level
+// of context so an obscure "Ellicott" isn't left dangling — its state, or
+// the country if there's no distinct state or the state name just echoes the
+// place ("Kyoto" / "Kyoto Prefecture" → "Kyoto, Japan").
+// A "wide" viewport (long side past this many km) is showing a whole region,
+// not a locality — the status line then reads "across Sichuan, China" rather
+// than "near Chongqing", and the center reverse-geocode is asked for a
+// coarser (region/country) label. Kept in step with server.js's own
+// wideView threshold in /explore-nearby.
+const EXPLORE_WIDE_VIEW_KM = 150;
+
+// {n,s,e,w} → length of the longer viewport edge in km.
+function exploreViewportLongSideKm(b) {
+    const midLat = (b.n + b.s) / 2;
+    const latKm = Math.abs(b.n - b.s) * 111;
+    const lngKm = Math.abs(b.e - b.w) * 111 * Math.max(Math.cos(midLat * Math.PI / 180), 0.02);
+    return Math.max(latKm, lngKm);
+}
+
+function pickExplorePlaceLabel(results, { coarse = false } = {}) {
+    const comps = results.flatMap(r => r.address_components || []);
+    const byType = t => comps.find(c => c.types.includes(t))?.long_name || '';
+    const locality = coarse ? '' : (byType('locality') || byType('postal_town')
+        || byType('administrative_area_level_3') || byType('administrative_area_level_2'));
+    const region = byType('administrative_area_level_1');
+    const country = byType('country');
+
+    const primary = locality || region || country;
+    if (!primary) return '';
+
+    let context = '';
+    if (primary === locality) {
+        if (region && !region.includes(primary) && !primary.includes(region)) context = region;
+        else if (country) context = country;
+    } else if (primary === region && country) {
+        context = country;
+    }
+    return context ? `${primary}, ${context}` : primary;
+}
+
+function refreshExploreCenterPlace(onResolved, { coarse = false } = {}) {
+    if (!window.google || !google.maps || !google.maps.Geocoder || !map) return;
+    if (!exploreGeocoder) exploreGeocoder = new google.maps.Geocoder();
+    const center = map.getCenter();
+    if (!center) return;
+    const token = ++exploreGeocodeToken;
+    exploreGeocoder.geocode({ location: center }, (results, status) => {
+        if (token !== exploreGeocodeToken) return;   // a newer refresh superseded this one
+        if (status !== 'OK' || !results || !results.length) { exploreCenterPlace = ''; return; }
+        const label = pickExplorePlaceLabel(results, { coarse });
+        exploreCenterPlace = label;
+        if (label && typeof onResolved === 'function') onResolved(label);
+    });
+}
+
+// Great-circle distance between two {lat,lng} points, in kilometres.
+function haversineKm(a, b) {
+    const R = 6371;
+    const toRad = d => d * Math.PI / 180;
+    const dLat = toRad(b.lat - a.lat);
+    const dLng = toRad(b.lng - a.lng);
+    const s = Math.sin(dLat / 2) ** 2 +
+        Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLng / 2) ** 2;
+    return 2 * R * Math.asin(Math.sqrt(s));
+}
+
+// The model that picks explore discoveries occasionally returns a real place
+// name with coordinates that land somewhere else entirely — e.g. "Slave Lake"
+// pinned in the Nunavut Arctic instead of northern Alberta. Forward-geocode
+// each name (biased to the current viewport so ambiguous names resolve
+// locally) and, when Google gives a confident, specific match that sits well
+// away from the model's coordinates, either snap the pin onto the geocoded
+// location (still inside the viewport) or drop the discovery (the place it
+// actually names isn't in this area). Names Google can't resolve — many
+// natural features and historical sites — are left exactly as the model gave
+// them. Resolves to a discovery (possibly with corrected lat/lng) or null.
+function verifyDiscoveryLocation(discovery, b) {
+    return new Promise(resolve => {
+        if (!window.google || !google.maps || !google.maps.Geocoder) { resolve(discovery); return; }
+        if (typeof discovery.lat !== 'number' || typeof discovery.lng !== 'number') { resolve(discovery); return; }
+        if (!exploreGeocoder) exploreGeocoder = new google.maps.Geocoder();
+        const bounds = new google.maps.LatLngBounds({ lat: b.s, lng: b.w }, { lat: b.n, lng: b.e });
+        exploreGeocoder.geocode({ address: discovery.name, bounds }, (results, status) => {
+            if (status !== 'OK' || !results || !results.length) { resolve(discovery); return; }
+            const top = results[0];
+            // A partial or coarse (country/region/county) match says little
+            // about where a specific site sits — don't second-guess the model
+            // on it. ('political' is excluded: every town carries it alongside
+            // its precise 'locality' type.)
+            const coarse = (top.types || []).some(t => [
+                'country', 'administrative_area_level_1', 'administrative_area_level_2',
+                'continent',
+            ].includes(t));
+            if (top.partial_match || coarse) { resolve(discovery); return; }
+
+            const loc = top.geometry && top.geometry.location;
+            if (!loc) { resolve(discovery); return; }
+            const geo = { lat: loc.lat(), lng: loc.lng() };
+            const off = haversineKm(discovery, geo);
+            // Only act on an unambiguous error — big features geocode to a
+            // centroid that can sit tens of km from a real point on them.
+            if (off <= 100) { resolve(discovery); return; }
+
+            const latM = Math.min(Math.max((b.n - b.s) * 0.15, 0.02), 0.15);
+            const lngM = Math.min(Math.max((b.e - b.w) * 0.15, 0.02), 0.15);
+            const inView = geo.lat >= b.s - latM && geo.lat <= b.n + latM &&
+                geo.lng >= b.w - lngM && geo.lng <= b.e + lngM;
+            if (inView) {
+                console.warn(`Explore: "${discovery.name}" was ${Math.round(off)} km off — snapped to geocoded location`);
+                resolve({ ...discovery, lat: geo.lat, lng: geo.lng });
+            } else {
+                console.warn(`Explore: dropped "${discovery.name}" — geocodes ${Math.round(off)} km away, outside the viewport`);
+                resolve(null);
+            }
+        });
+    });
+}
+
+// Zooms/pans so every pin in the batch that just spawned is visible at once.
+// Skipped for a single discovery — fitBounds on a near-zero-size bounds tends
+// to over-zoom, and "show all of them" is trivially already true for one pin.
+// fitBounds itself pans/zooms the map, which would otherwise fire
+// bounds_changed and queue up yet another discovery fetch for the resulting
+// viewport — pause the idle listener across the animation and resync
+// exploreLastBounds once the map actually settles instead.
+function fitExploreDiscoveries(batch) {
+    if (!batch || batch.length < 2) return;
+    const bounds = new google.maps.LatLngBounds();
+    batch.forEach(d => bounds.extend({ lat: d.lat, lng: d.lng }));
+
+    if (exploreIdleListener) {
+        google.maps.event.removeListener(exploreIdleListener);
+        exploreIdleListener = null;
+    }
+    map.fitBounds(bounds, 60);
+    google.maps.event.addListenerOnce(map, 'idle', () => {
+        if (!exploreModeActive) return;
+        const b = map.getBounds();
+        if (b) {
+            const ne = b.getNorthEast(), sw = b.getSouthWest();
+            exploreLastBounds = { n: ne.lat(), s: sw.lat(), e: ne.lng(), w: sw.lng() };
+        }
+        exploreIdleListener = map.addListener('bounds_changed', scheduleExploreCheck);
+    });
+}
+
+let exploreDebounceTimer = null;
+function scheduleExploreCheck(immediate = false) {
+    if (exploreDebounceTimer) { clearTimeout(exploreDebounceTimer); exploreDebounceTimer = null; }
+    if (immediate) { exploreOnIdle(); return; }
+    exploreDebounceTimer = setTimeout(() => { exploreDebounceTimer = null; exploreOnIdle(); }, 700);
+}
+
+// Whether the map has moved/zoomed enough since the last fetch to justify a
+// new one — keeps idle events from tiny nudges (e.g. after smoothZoom, or a
+// popout repositioning the map slightly) from refiring a spawn.
+function exploreBoundsChangedEnough(b, prev = exploreLastBounds) {
+    if (!prev) return true;
+    const latSpan = b.n - b.s, lngSpan = b.e - b.w;
+    const prevLatSpan = prev.n - prev.s, prevLngSpan = prev.e - prev.w;
+    const movedLat = Math.abs(((b.n + b.s) / 2) - ((prev.n + prev.s) / 2));
+    const movedLng = Math.abs(((b.e + b.w) / 2) - ((prev.e + prev.w) / 2));
+    const spanChanged = Math.abs(latSpan - prevLatSpan) / (prevLatSpan || 1);
+    return movedLat > latSpan * 0.4 || movedLng > lngSpan * 0.4 || spanChanged > 0.35;
+}
+
+function exploreOnIdle() {
+    if (!exploreModeActive) return;
+    // A fetch is already running for an earlier viewport. Don't queue a second
+    // one now — but remember that the map has moved so spawnDiscoveries' finally
+    // can kick off a fresh check for wherever the user has ended up.
+    if (exploreFetchInFlight) { explorePendingRecheck = true; return; }
+    if (Date.now() < exploreSuppressAutoFetchUntil) return;
+
+    const zoom = map.getZoom();
+    const bounds = map.getBounds();
+    // Normally discoveries only spawn at EXPLORE_MIN_ZOOM+. For the session's
+    // very first batch, though, honour the first zoom-in gesture: once the
+    // user has zoomed in past where explore mode started, fetch at whatever
+    // zoom they've reached (down to a sane floor) instead of making them keep
+    // zooming. Every batch after the first uses the normal floor again.
+    const firstZoomIn = !exploreFirstFetchDone
+        && exploreEntryZoom !== null
+        && zoom >= exploreEntryZoom + 0.5;
+    const minZoom = firstZoomIn ? EXPLORE_FIRST_FETCH_MIN_ZOOM : EXPLORE_MIN_ZOOM;
+    if (!bounds || zoom < minZoom) {
+        // Too zoomed out to fetch a new batch, but any pins already found
+        // stay put (see resetExploreDiscoveries for the way to clear them) —
+        // wandering back out shouldn't erase what's already been discovered.
+        if (exploreMarkers.length > 0) {
+            setExploreBarStatus(`${exploreMarkers.length} place${exploreMarkers.length === 1 ? '' : 's'} discovered so far — zoom or pan in to find more`);
+        } else {
+            setExploreBarStatus('Zoom or pan in to discover places', { idle: true });
+        }
+        return;
+    }
+
+    const ne = bounds.getNorthEast(), sw = bounds.getSouthWest();
+    const b = { n: ne.lat(), s: sw.lat(), e: ne.lng(), w: sw.lng() };
+    if (!exploreBoundsChangedEnough(b)) return;
+
+    spawnDiscoveries(b);
+}
+
+// Builds and drops a discovery pin onto the map, wiring up its hover/click
+// behavior and photo-icon upgrade — shared by spawnDiscoveries (the "wander
+// nearby" batch) and quickLoadExploreFollowUp (a related place surfaced from
+// inside the detail panel, possibly far outside the current viewport).
+function addExploreMarker(discovery) {
+    exploreShownNames.push(discovery.name);
+    const color = EXPLORE_CATEGORY_COLOR[discovery.category] || ACCENT_PRESETS.blue.accent;
+    const marker = new google.maps.Marker({
+        position: { lat: discovery.lat, lng: discovery.lng },
+        map,
+        title: discovery.name,
+        icon: {
+            url: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(buildExplorePinSvg(EXPLORE_CATEGORY_EMOJI[discovery.category] || '✨', color)),
+            scaledSize: new google.maps.Size(50, 64),
+            anchor: new google.maps.Point(25, 60),
+            // Hangs the label chip a bit below the pin's tip
+            // rather than centered on the icon (the default),
+            // so the title reads as a caption under the pin
+            // instead of overlapping it.
+            labelOrigin: new google.maps.Point(25, 74),
+        },
+        // Always-on title, in place of relying on the hover-only
+        // #marker-popout teaser to say what a pin even is — see
+        // .explore-pin-label in styles.css for the chip look.
+        label: {
+            text: discovery.name,
+            className: 'explore-pin-label',
+            color: '#fff',
+            fontSize: '11px',
+            fontWeight: '600',
+        },
+    });
+    // Hover: quick teaser popout (unchanged). Click: pulls up the
+    // full title/info/images view directly rather than doing a
+    // search — see openExploreDetail. A full search only happens
+    // if the user explicitly asks for one from inside that view.
+    marker.addListener('mouseover', () => {
+        const pos = getMarkerScreenPos(marker.position);
+        if (pos) showExplorePopout(discovery, pos);
+    });
+    marker.addListener('mouseout', scheduleHideMarkerPopout);
+    marker.addListener('click', () => openExploreDetail(discovery));
+
+    // Upgrade the pin from a plain emoji badge to a photo
+    // thumbnail once the discovery's Wikipedia image resolves —
+    // same treatment search-result pins get (buildImageMarkerSvg/
+    // setMarkerPinIcon), just with the category emoji kept as a
+    // small corner badge instead of a number.
+    marker._pinColor = color;
+    marker._pinEmoji = EXPLORE_CATEGORY_EMOJI[discovery.category] || '✨';
+    marker._pinImageDataUri = null;
+    getDiscoveryImageInfo(discovery).then(({ imageUrl }) => {
+        if (!imageUrl) return;
+        fetchImageAsDataUri(imageUrl).then(dataUri => {
+            if (!dataUri) return;
+            marker._pinImageDataUri = dataUri;
+            setExplorePinIcon(marker);
+        });
+    });
+
+    exploreMarkers.push(marker);
+    exploreDiscoveries.push(discovery);
+    return marker;
+}
+
+async function spawnDiscoveries(b) {
+    exploreFetchInFlight = true;
+    explorePendingRecheck = false;  // this fetch covers the current viewport; only a move *after* now counts
+    exploreFirstFetchDone = true;   // relaxed first-fetch zoom floor is spent
+    // Fold any curation focus into the wording — "Discovering volcanoes near
+    // Naples…" rather than a bare "Discovering nearby…".
+    const subj = exploreFocus ? `${exploreFocus} ` : '';
+    // Zoomed-out views search a whole region, so the status reads "across
+    // Sichuan, China" / "…in view" rather than "near <city>".
+    const wide = exploreViewportLongSideKm(b) > EXPLORE_WIDE_VIEW_KM;
+    const prep = wide ? 'across' : 'near';
+    const areaWord = wide ? 'in view' : 'nearby';
+    setExploreBarStatus(exploreCenterPlace
+        ? `Discovering ${subj}${prep} ${exploreCenterPlace}…`
+        : `Discovering ${subj || areaWord}…`);
+    document.getElementById('exploreBar')?.classList.add('loading');
+    // Re-geocode the map center for this batch; if it resolves while the
+    // fetch is still running, upgrade the bare "Discovering nearby…" to name
+    // the place. Cached in exploreCenterPlace for the result-count line too.
+    refreshExploreCenterPlace(label => {
+        if (exploreFetchInFlight) setExploreBarStatus(`Discovering ${subj}${prep} ${label}…`);
+    }, { coarse: wide });
+
+    try {
+        const center = map.getCenter();
+        const res = await fetch('/explore-nearby', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                lat: center.lat(), lng: center.lng(),
+                north: b.n, south: b.s, east: b.e, west: b.w,
+                exclude: exploreShownNames.slice(-40),
+                focus: exploreFocus || undefined,
+                categories: exploreCurationCategoriesParam() || undefined,
+            }),
+        });
+        const data = await res.json();
+        const rawDiscoveries = Array.isArray(data.discoveries) ? data.discoveries : [];
+
+        // Sanity-check each place against Google's geocoder before it hits the
+        // map — corrects pins the model misplaced, drops ones that name a
+        // place outside this area. Names it can't resolve pass through as-is.
+        const verified = await Promise.all(rawDiscoveries.map(d => verifyDiscoveryLocation(d, b)));
+        const discoveries = [];
+        verified.forEach((d, i) => {
+            // Drop anything outside the curated category set — the server is
+            // asked to honour it, but the model doesn't always comply.
+            if (d && exploreDiscoveryMatchesCuration(d)) discoveries.push(d);
+            // Suppress a dropped name so the next batch doesn't re-suggest it.
+            else if (rawDiscoveries[i]?.name) exploreShownNames.push(rawDiscoveries[i].name);
+        });
+
+        // The user may have left explore mode (or panned again) while this
+        // was in flight — don't drop pins onto a map they're no longer on.
+        if (!exploreModeActive) return;
+
+        // The user may have panned/zoomed to a different area while the LLM
+        // call was running. Dropping this (now-stale) batch there — and worse,
+        // fitExploreDiscoveries yanking the map back to fit it — is exactly the
+        // "results keep appearing in the old spot" glitch. Discard the batch and
+        // let the finally-block schedule a fresh fetch for where they are now.
+        const curBounds = map.getBounds();
+        if (curBounds) {
+            const cne = curBounds.getNorthEast(), csw = curBounds.getSouthWest();
+            const cb = { n: cne.lat(), s: csw.lat(), e: cne.lng(), w: csw.lng() };
+            if (exploreBoundsChangedEnough(cb, b)) {
+                explorePendingRecheck = true;
+                return;
+            }
+        }
+
+        // A new batch means the user has wandered on from whatever the
+        // detail panel was showing — close it rather than leave it open over
+        // an area of the map they've left behind.
+        closeExploreDetail();
+        // Pins from earlier batches stay on the map — wandering off to a new
+        // area shouldn't erase what was already discovered elsewhere. See
+        // resetExploreDiscoveries() for the explicit "clear everything" action.
+        const newBatch = [];
+        if (discoveries.length === 0) {
+            setExploreBarStatus(
+                exploreFocus ? `No “${exploreFocus}” places here — try panning, or change your focus`
+                : exploreCurationActive() ? 'Nothing in those categories here — try panning, or add categories'
+                : 'Nothing new found here — try panning further');
+        } else {
+            discoveries.forEach(discovery => {
+                addExploreMarker(discovery);
+                newBatch.push(discovery);
+            });
+            if (exploreShownNames.length > 200) exploreShownNames = exploreShownNames.slice(-120);
+            const noun = exploreFocus
+                ? `“${exploreFocus}” place${discoveries.length === 1 ? '' : 's'}`
+                : `place${discoveries.length === 1 ? '' : 's'}`;
+            setExploreBarStatus(`${discoveries.length} ${noun} ${exploreCenterPlace ? `${prep} ${exploreCenterPlace}` : areaWord}`);
+            fitExploreDiscoveries(newBatch);
+        }
+        exploreLastBounds = b;
+    } catch (error) {
+        console.error('Error fetching /explore-nearby:', error);
+        if (exploreModeActive) setExploreBarStatus('Couldn’t reach the server — try panning again');
+    } finally {
+        exploreFetchInFlight = false;
+        document.getElementById('exploreBar')?.classList.remove('loading');
+        // The map moved while this fetch ran (or its results were stale on
+        // arrival) — check the current viewport now that we're free to fetch
+        // again. Debounced, so an actively-panning user settles first.
+        if (explorePendingRecheck && exploreModeActive) {
+            explorePendingRecheck = false;
+            scheduleExploreCheck();
+        }
+    }
+}
+
+function diveIntoDiscovery(discovery) {
+    hideMarkerPopout();
+    exitExploreMode({ skipMarkerRestore: true });
+    document.getElementById('questionInput').value = discovery.name;
+    askQuestion();
+}
+
+// ============== EXPLORE DETAIL PANELS ==============
+// The "pull up the view" panels opened by clicking a discovery pin —
+// #edpTitleBar (title, top-center), #edpSummaryPanel (write-up, left) and
+// #edpImagePanel (image(s) + street view, right) — laid out exactly like the
+// normal per-location view (#summaryTitleBar/#questionBox/#currentImagePanel),
+// but for a single standalone place. A full search (diveIntoDiscovery) only
+// happens if the user explicitly asks for it via #edpDeepDiveBtn; otherwise
+// "Where to next" (renderExploreFollowUps) lets them quick-load a related
+// place — possibly far away, tied by history/theme rather than proximity —
+// without ever leaving this lightweight view.
+
+const EXPLORE_DETAIL_PANEL_IDS = ['edpTitleBar', 'edpSummaryPanel', 'edpImagePanel'];
+
+function openExploreDetail(discovery) {
+    hideMarkerPopout();
+    closeExploreCuratePanel();
+    document.body.classList.add('explore-detail-open');
+    exploreDetailDiscovery = discovery;
+    const requestId = ++exploreDetailRequestId;
+
+    // Title/summary always show, but the image panel stays hidden until an
+    // image actually turns up — same as #currentImagePanel in the normal
+    // per-location view (see setCurrentImage), rather than showing an empty
+    // frame with just the placeholder emoji.
+    document.getElementById('edpTitleBar')?.classList.add('visible');
+    document.getElementById('edpSummaryPanel')?.classList.add('visible');
+    document.getElementById('edpImagePanel')?.classList.remove('visible');
+    document.getElementById('edpSummaryPanel').scrollTop = 0;
+
+    document.getElementById('edpCategory').textContent = EXPLORE_CATEGORY_LABEL[discovery.category] || '';
+    document.getElementById('edpTitle').textContent = discovery.name;
+    document.getElementById('edpCoords').textContent = formatLocationMeta(discovery).coords;
+    // Show the teaser straight away, with a loading row beneath it so it's
+    // clear a fuller write-up is still on its way (the /location-summary fetch
+    // below replaces this whole block once it lands).
+    const edpSummaryLoadingRow =
+        '<div class="edp-summary-loading">' +
+        '<span class="loading-dots"><span></span><span></span><span></span></span>' +
+        '<span class="edp-summary-loading-label">Loading full summary…</span>' +
+        '</div>';
+    document.getElementById('edpSummary').innerHTML = discovery.teaser
+        ? marked.parse(discovery.teaser) + edpSummaryLoadingRow
+        : edpSummaryLoadingRow;
+
+    const img = document.getElementById('edpImg');
+    const placeholder = document.getElementById('edpImgPlaceholder');
+    const imgDesc = document.getElementById('edpImgDesc');
+    img.src = '';
+    img.style.display = 'none';
+    placeholder.style.display = 'none';
+    imgDesc.textContent = '';
+    document.getElementById('edpExtraImages').innerHTML = '';
+
+    renderExploreFollowUps(discovery);
+    checkStreetView(discovery.lat, discovery.lng, () => exploreDetailRequestId !== requestId);
+
+    getDiscoveryImageInfo(discovery).then(({ imageUrl, articleUrl, extract }) => {
+        if (requestId !== exploreDetailRequestId) return; // panel moved on to something else
+        if (imageUrl) {
+            img.src = imageUrl;
+            img.style.display = '';
+            placeholder.style.display = 'none';
+            document.getElementById('edpImagePanel')?.classList.add('visible');
+        }
+        if (extract) imgDesc.textContent = extract;
+        if (articleUrl) {
+            fetchExtraImages(articleUrl, imageUrl).then(urls => {
+                if (requestId !== exploreDetailRequestId) return;
+                document.getElementById('edpExtraImages').innerHTML = urls
+                    .map(u => `<img src="${u}" onclick="selectExploreDetailImage('${u.replace(/'/g, "\\'")}')">`)
+                    .join('');
+                // The extra-images grid can grow the image panel after the
+                // street view thumbnail below it was already positioned —
+                // nudge it back into place, same as setExtraImages() does
+                // for the real per-location view.
+                const svSlot = document.getElementById('loc-streetview-slot');
+                if (svSlot && svSlot.style.display !== 'none') positionStreetViewSlot();
+            });
+        }
+    });
+
+    fetch('/location-summary', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question: discovery.name, locationName: discovery.name, event: discovery.teaser, year: null }),
+    }).then(r => r.json()).then(({ summary }) => {
+        if (requestId !== exploreDetailRequestId) return;
+        const cleanSummary = (summary || '').replace(/^\s*#{1,6}\s+.+?\s*\n+/, '');
+        document.getElementById('edpSummary').innerHTML = cleanSummary
+            ? marked.parse(cleanSummary)
+            : (discovery.teaser ? marked.parse(discovery.teaser) : '');
+    }).catch(() => {
+        if (requestId !== exploreDetailRequestId) return;
+        document.getElementById('edpSummary').innerHTML = discovery.teaser ? marked.parse(discovery.teaser) : '';
+    });
+}
+
+function closeExploreDetail() {
+    document.body.classList.remove('explore-detail-open');
+    if (!exploreDetailDiscovery) return;
+    exploreDetailDiscovery = null;
+    exploreDetailRequestId++; // void any in-flight fetches for the closed panel
+    EXPLORE_DETAIL_PANEL_IDS.forEach(id => document.getElementById(id)?.classList.remove('visible'));
+    const svSlot = document.getElementById('loc-streetview-slot');
+    if (svSlot) { svSlot.style.display = 'none'; svSlot.innerHTML = ''; }
+    locStreetViewPano = null;
+}
+
+function selectExploreDetailImage(url) {
+    const img = document.getElementById('edpImg');
+    img.src = url;
+    img.style.display = '';
+    document.getElementById('edpImgPlaceholder').style.display = 'none';
+}
+
+// Keyed by discovery name -> Promise<discovery[]>, so hopping back to a place
+// already looked at (via a follow-up card) doesn't refire the network call.
+let exploreRelatedCache = {};
+
+// "Where to next" — follow-up places tied to this one by history/theme/story
+// rather than by what happens to already be pinned nearby, so they can be
+// anywhere in the world (see /explore-related). Each card quick-loads its
+// place straight into this same lightweight detail view; only the explicit
+// "Full search deep dive" button hands off to the full search pipeline.
+function renderExploreFollowUps(discovery) {
+    const list = document.getElementById('edpSimilarList');
+    const requestId = exploreDetailRequestId;
+    list.innerHTML = '<div class="explore-followups-loading">Finding what\'s next…</div>';
+
+    getExploreRelated(discovery).then(related => {
+        if (exploreDetailRequestId !== requestId) return; // panel moved on
+        if (!related.length) {
+            list.innerHTML = '';
+            return;
+        }
+        list.innerHTML = related.map((d, i) => `
+            <button type="button" class="explore-similar-card" data-followup-index="${i}">
+                <span class="explore-similar-card-emoji">${EXPLORE_CATEGORY_EMOJI[d.category] || '✨'}</span>
+                <span class="explore-similar-card-text">
+                    <span class="explore-similar-card-name">${d.name}</span>
+                    <span class="explore-similar-card-teaser">${d.teaser || ''}</span>
+                </span>
+            </button>
+        `).join('');
+        list.querySelectorAll('.explore-similar-card').forEach((btn, i) => {
+            btn.addEventListener('click', () => quickLoadExploreFollowUp(related[i]));
+        });
+    }).catch(() => {
+        if (exploreDetailRequestId !== requestId) return;
+        list.innerHTML = '';
+    });
+}
+
+function getExploreRelated(discovery) {
+    if (exploreRelatedCache[discovery.name]) return exploreRelatedCache[discovery.name];
+    const promise = fetch('/explore-related', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            name: discovery.name,
+            teaser: discovery.teaser,
+            category: discovery.category,
+            exclude: exploreShownNames.slice(-40),
+            focus: exploreFocus || undefined,
+            categories: exploreCurationCategoriesParam() || undefined,
+        }),
+    }).then(r => r.json()).then(data => Array.isArray(data.related) ? data.related : [])
+      .catch(() => []);
+    exploreRelatedCache[discovery.name] = promise;
+    return promise;
+}
+
+// A follow-up card is a quick look, not a full dive: drop its pin (or reuse
+// one already on the map), pan the map to it — which may be well outside the
+// current viewport — and swap the detail panel straight to it. Panning during
+// explore mode normally queues up a fresh "wander nearby" fetch once the map
+// settles (see scheduleExploreCheck/exploreOnIdle); that fetch would close
+// this very panel a moment after it opens, so the auto-fetch is suppressed
+// for a few seconds rather than left to fire on this programmatic move.
+function quickLoadExploreFollowUp(discovery) {
+    hideMarkerPopout();
+    const existing = exploreDiscoveries.find(d => d.name === discovery.name);
+    const target = existing || discovery;
+    if (!existing) addExploreMarker(discovery);
+
+    exploreSuppressAutoFetchUntil = Date.now() + 4000;
+    map.panTo({ lat: target.lat, lng: target.lng });
+    smoothZoom(getLocationZoom());
+
+    openExploreDetail(target);
+}
+
+function deepDiveExploreDetail() {
+    if (!exploreDetailDiscovery) return;
+    diveIntoDiscovery(exploreDetailDiscovery);
 }
 
 function startIntroPlayback() {
@@ -3432,12 +4731,28 @@ function getMarkerScreenPos(latlng) {
     };
 }
 
+// Anchors #marker-popout to a screen point and picks which way it opens.
+// It defaults to opening upward (see the CSS transform on #marker-popout),
+// which clips off-screen when the anchor — a pin, or an icon like the
+// explore bar buttons — sits near the top of the viewport; in that case we
+// flip it to open downward instead via the .flip-down class. Uses the
+// popout's real rendered height when it's already visible (repositioning
+// while hovering between markers), falling back to a conservative estimate
+// for the first show, when it's still display:none and reports 0 height.
+function positionMarkerPopout(popout, screenPos) {
+    popout.style.left = screenPos.x + 'px';
+    popout.style.top = screenPos.y + 'px';
+    const gap = 28;
+    const estimatedHeight = popout.offsetHeight || 300;
+    const opensOffscreen = (screenPos.y - estimatedHeight - gap) < 8;
+    popout.classList.toggle('flip-down', opensOffscreen);
+}
+
 function showMarkerPopoutForLocation(location, index, screenPos) {
     if (activePopoutIndex === index) {
         // Just reposition if already showing
         const popout = document.getElementById('marker-popout');
-        popout.style.left = screenPos.x + 'px';
-        popout.style.top = screenPos.y + 'px';
+        positionMarkerPopout(popout, screenPos);
         return;
     }
     activePopoutIndex = index;
@@ -3473,6 +4788,7 @@ function showMarkerPopoutForLocation(location, index, screenPos) {
             img.style.display = 'none';
             placeholder.style.display = '';
         }
+        popout.classList.toggle('no-img', !cached.imageUrl);
         if (cached.extract) {
             extractEl.textContent = cached.extract;
             extractEl.style.display = '';
@@ -3484,18 +4800,19 @@ function showMarkerPopoutForLocation(location, index, screenPos) {
     } else {
         img.style.display = 'none';
         placeholder.style.display = '';
+        popout.classList.add('no-img');
         extractEl.style.display = 'none';
         imgDescEl.textContent = '';
         fetchLocationImage(location).then(({ imageUrl, extract }) => {
             locationImageCache[index] = { imageUrl, extract };
             if (activePopoutIndex !== index) return;
+            popout.classList.toggle('no-img', !imageUrl);
             if (imageUrl) { img.src = imageUrl; img.style.display = ''; placeholder.style.display = 'none'; }
             if (extract) { extractEl.textContent = extract; extractEl.style.display = ''; imgDescEl.textContent = extract; }
         });
     }
 
-    popout.style.left = screenPos.x + 'px';
-    popout.style.top = screenPos.y + 'px';
+    positionMarkerPopout(popout, screenPos);
     popout.classList.remove('visible');
     // Force reflow so animation replays
     void popout.offsetWidth;
@@ -3503,9 +4820,24 @@ function showMarkerPopoutForLocation(location, index, screenPos) {
 }
 
 function hideMarkerPopout() {
-    if (activePopoutIndex === null) return;
+    if (popoutHideTimer) { clearTimeout(popoutHideTimer); popoutHideTimer = null; }
+    if (activePopoutIndex === null && activeExploreDiscovery === null) return;
     activePopoutIndex = null;
+    activeExploreDiscovery = null;
     document.getElementById('marker-popout').classList.remove('visible');
+}
+
+// Marker mouseout hides the popout after a short grace period rather than
+// instantly, so moving the cursor from a small pin up to the popout card
+// itself (which is clickable to open the location) doesn't close it out from
+// under the mouse mid-move. Cancelled by hideMarkerPopout (a fresh
+// show*Popout call, or the popout being clicked/re-entered) or resumed by
+// re-hovering out of the popout itself — see the mouseenter/mouseleave
+// wiring on #marker-popout in initMap.
+let popoutHideTimer = null;
+function scheduleHideMarkerPopout() {
+    if (popoutHideTimer) clearTimeout(popoutHideTimer);
+    popoutHideTimer = setTimeout(() => { popoutHideTimer = null; hideMarkerPopout(); }, 250);
 }
 
 function dismissMarkerPopout() {
@@ -3513,11 +4845,68 @@ function dismissMarkerPopout() {
 }
 
 function handlePopoutClick() {
+    if (activeExploreDiscovery) {
+        openExploreDetail(activeExploreDiscovery);
+        return;
+    }
     if (activePopoutIndex === null) return;
     const idx = activePopoutIndex;
     const loc = activeLocations[idx - 1];
     hideMarkerPopout();
     focusLocation(loc, idx);
+}
+
+// Explore-mode counterpart to showMarkerPopoutForLocation above — same
+// #marker-popout DOM/CSS, populated from a lightweight discovery object
+// instead of an indexed activeLocations entry. Year/event rows are hidden
+// since discoveries don't carry them; the image comes from a live Wikipedia
+// lookup by name (same helper used for the topic hero image) rather than
+// anything the model supplied. handlePopoutClick() branches on
+// activeExploreDiscovery to dive in instead of calling focusLocation().
+function showExplorePopout(discovery, screenPos) {
+    if (activeExploreDiscovery === discovery) {
+        const popout = document.getElementById('marker-popout');
+        positionMarkerPopout(popout, screenPos);
+        return;
+    }
+    activePopoutIndex = null;
+    activeExploreDiscovery = discovery;
+
+    const popout = document.getElementById('marker-popout');
+    popout.querySelector('.mp-name').textContent = discovery.name;
+    popout.querySelector('.mp-year').style.display = 'none';
+    popout.querySelector('.mp-event').style.display = 'none';
+
+    const img = document.getElementById('mp-img');
+    const placeholder = popout.querySelector('.mp-img-placeholder');
+    const extractEl = popout.querySelector('.mp-extract');
+    const imgDescEl = document.getElementById('mp-img-desc');
+
+    img.style.display = 'none';
+    placeholder.style.display = '';
+    popout.classList.add('no-img');
+    if (discovery.teaser) {
+        extractEl.textContent = discovery.teaser;
+        extractEl.style.display = '';
+        imgDescEl.textContent = discovery.teaser;
+    } else {
+        extractEl.style.display = 'none';
+        imgDescEl.textContent = '';
+    }
+
+    getDiscoveryImageInfo(discovery).then(({ imageUrl }) => {
+        if (activeExploreDiscovery !== discovery) return;
+        if (!imageUrl) return;
+        img.src = imageUrl;
+        img.style.display = '';
+        placeholder.style.display = 'none';
+        popout.classList.remove('no-img');
+    });
+
+    positionMarkerPopout(popout, screenPos);
+    popout.classList.remove('visible');
+    void popout.offsetWidth;
+    popout.classList.add('visible');
 }
 
 function processResponse(data, imageUrl = null, articleUrl = null, extract = null) {
@@ -3571,7 +4960,20 @@ function processResponse(data, imageUrl = null, articleUrl = null, extract = nul
            </div>`
         : '';
 
-    document.getElementById("answer").innerHTML = introHTML + marked.parse(bodyMarkdown) + sourceHTML + relatedHTML;
+    document.getElementById("answer").innerHTML = introHTML + marked.parse(bodyMarkdown) + sourceHTML
+        + `<div class="fact-check-note" id="factCheckNote" hidden></div>` + relatedHTML;
+
+    // Quietly cross-check the opening claim against the Wikipedia extract in
+    // the background. Only ever adds a badge — never blocks or alters the
+    // rendered answer — and is skipped entirely if there's nothing to check.
+    if (intro && extract) {
+        const factCheckEl = document.getElementById('factCheckNote');
+        factCheckOverview(intro, extract).then(result => {
+            if (!result || !result.flag || !document.body.contains(factCheckEl)) return;
+            factCheckEl.textContent = `⚠ ${result.note || 'This may conflict with Wikipedia — worth double-checking.'}`;
+            factCheckEl.hidden = false;
+        });
+    }
     document.getElementById("voiceControls").style.display = "flex";
     const autoplayBtn = document.getElementById('autoplayBtn');
     if (autoplayBtn) {
@@ -3839,6 +5241,61 @@ function buildNumberedPinSvg(n, color, focused) {
     </svg>`;
 }
 
+// Explore-mode discovery pin — same teardrop silhouette as the numbered
+// search-result pins (buildNumberedPinSvg above), not the old flat translucent
+// circle: a solid color fill with a white outline and a real drop shadow so
+// it reads as a pin sitting on the map instead of a soft badge blending into
+// it, colored per-category (see EXPLORE_CATEGORY_COLOR) so the different
+// kinds of places stand out from each other independent of the user's single
+// chosen accent color. Sized larger than the numbered pins (50x64 vs 30x38)
+// since these are the primary thing on screen in explore mode rather than
+// one of several. The tip (25,60) is the anchor; see spawnDiscoveries for how
+// the accompanying always-on title label is hung just below it.
+function buildExplorePinSvg(emoji, color) {
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="50" height="64" viewBox="0 0 50 64">
+        <filter id="expShadow" x="-50%" y="-50%" width="200%" height="200%"><feDropShadow dx="0" dy="2.5" stdDeviation="2.5" flood-color="rgba(0,0,0,0.5)"/></filter>
+        <path d="M25 3 C13 3 4 12 4 24 C4 38 25 60 25 60 C25 60 46 38 46 24 C46 12 37 3 25 3 Z" fill="${color}" stroke="#fff" stroke-width="3" filter="url(#expShadow)"/>
+        <text x="25" y="23" text-anchor="middle" dominant-baseline="central" font-size="21">${emoji}</text>
+    </svg>`;
+}
+
+// Explore-pin counterpart to buildImageMarkerSvg — same teardrop silhouette
+// and size as buildExplorePinSvg, but once the discovery's Wikipedia
+// thumbnail has loaded it fills the pin's head with that photo (clipped to a
+// circle) and tucks the category emoji into a small corner badge, in place
+// of the number badge search-result pins use. See setExplorePinIcon.
+function buildExploreImagePinSvg(emoji, color, dataUri) {
+    return `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="50" height="64" viewBox="0 0 50 64">
+        <defs>
+            <filter id="expShadowImg" x="-50%" y="-50%" width="200%" height="200%"><feDropShadow dx="0" dy="2.5" stdDeviation="2.5" flood-color="rgba(0,0,0,0.5)"/></filter>
+            <clipPath id="expCpImg"><circle cx="25" cy="23" r="18"/></clipPath>
+        </defs>
+        <path d="M25 3 C13 3 4 12 4 24 C4 38 25 60 25 60 C25 60 46 38 46 24 C46 12 37 3 25 3 Z" fill="${color}" stroke="#fff" stroke-width="3" filter="url(#expShadowImg)"/>
+        <circle cx="25" cy="23" r="19.5" fill="#fff"/>
+        <image href="${dataUri}" x="6" y="4" width="38" height="38" clip-path="url(#expCpImg)" preserveAspectRatio="xMidYMid slice"/>
+        <circle cx="38" cy="37" r="9" fill="${color}" stroke="#fff" stroke-width="1.5"/>
+        <text x="38" y="37" text-anchor="middle" dominant-baseline="central" font-size="12">${emoji}</text>
+    </svg>`;
+}
+
+// Rebuilds one explore-mode discovery marker's icon — plain emoji pin if its
+// image hasn't loaded yet (or never resolves), photo-thumbnail pin once it
+// has. Mirrors setMarkerPinIcon's role for search-result pins; explore pins
+// don't have a focused/emphasized state so this only toggles the one thing.
+function setExplorePinIcon(marker) {
+    const svg = marker._pinImageDataUri
+        ? buildExploreImagePinSvg(marker._pinEmoji, marker._pinColor, marker._pinImageDataUri)
+        : buildExplorePinSvg(marker._pinEmoji, marker._pinColor);
+    marker.setIcon({
+        url: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(svg),
+        scaledSize: new google.maps.Size(50, 64),
+        anchor: new google.maps.Point(25, 60),
+        // Same label offset as the initial icon set in spawnDiscoveries —
+        // keeps the title chip hanging below the pin's tip either way.
+        labelOrigin: new google.maps.Point(25, 74),
+    });
+}
+
 // Rebuilds one non-main marker's icon (image thumbnail pin if its image has
 // loaded, otherwise the plain numbered pin) at normal or emphasized size, and
 // sets its opacity/z-index to match. Called both right after a marker's image
@@ -4033,7 +5490,7 @@ function renderMarkers(locations, periods = []) {
             const pos = getMarkerScreenPos(marker.position);
             if (pos) showMarkerPopoutForLocation(location, index + 1, pos);
         });
-        marker.addListener('mouseout', hideMarkerPopout);
+        marker.addListener('mouseout', scheduleHideMarkerPopout);
 
         activeMarkers.push(marker);
         bounds.extend(marker.position);
@@ -4693,6 +6150,13 @@ function toggleMapStyle() {
     const titleBar = document.getElementById('summaryTitleBar');
     const imgPanel = document.getElementById('currentImagePanel');
     const qb = document.getElementById('questionBox');
+    // Explore detail's own title/image/summary trio stacks the same way on
+    // mobile — kept as separate elements (see the HTML comment above
+    // #edpTitleBar) but sharing this same stacking logic rather than
+    // duplicating it.
+    const edpTitleBar = document.getElementById('edpTitleBar');
+    const edpImgPanel = document.getElementById('edpImagePanel');
+    const edpSummaryPanel = document.getElementById('edpSummaryPanel');
     if (!titleBar || !imgPanel || !qb) return;
     const GAP = 10;
 
@@ -4712,6 +6176,8 @@ function toggleMapStyle() {
         if (!isMobile() || qb.classList.contains('centered')) {
             if (!imgPanel.classList.contains('panel-repositioned')) imgPanel.style.top = '';
             if (!qb.classList.contains('panel-repositioned')) qb.style.top = '';
+            if (edpImgPanel) edpImgPanel.style.top = '';
+            if (edpSummaryPanel) edpSummaryPanel.style.top = '';
             return;
         }
         // A manually dragged panel already has an explicit position the
@@ -4732,6 +6198,16 @@ function toggleMapStyle() {
             nextTop = imgPanel.getBoundingClientRect().bottom + GAP;
         }
         qb.style.top = nextTop + 'px';
+
+        // Explore detail panels aren't draggable and have no collapse
+        // toggle — when open, they're always all three at full height, so
+        // this is just a straight top-to-bottom chain.
+        if (edpTitleBar && edpImgPanel && edpSummaryPanel && edpTitleBar.classList.contains('visible')) {
+            let edpNextTop = edpTitleBar.getBoundingClientRect().bottom + GAP;
+            edpImgPanel.style.top = edpNextTop + 'px';
+            edpNextTop = edpImgPanel.getBoundingClientRect().bottom + GAP;
+            edpSummaryPanel.style.top = edpNextTop + 'px';
+        }
     }
 
     // A class flip (result-mode, `.visible`, the expand toggle) changes
@@ -4759,13 +6235,15 @@ function toggleMapStyle() {
     const ro = new ResizeObserver(layout);
     ro.observe(titleBar);
     ro.observe(imgPanel);
+    if (edpTitleBar) ro.observe(edpTitleBar);
+    if (edpImgPanel) ro.observe(edpImgPanel);
     window.addEventListener('resize', layout);
     // Class changes drive the stack too: entering/leaving result-mode,
     // the image panel gaining/losing `.visible`, and the expand/collapse
     // toggle on <body> all shift where the next panel down should land.
     new MutationObserver(layoutSoon).observe(document.body, { attributes: true, attributeFilter: ['class'] });
-    [titleBar, imgPanel, qb].forEach((el) => {
-        new MutationObserver(layoutSoon).observe(el, { attributes: true, attributeFilter: ['class'] });
+    [titleBar, imgPanel, qb, edpTitleBar, edpImgPanel, edpSummaryPanel].forEach((el) => {
+        if (el) new MutationObserver(layoutSoon).observe(el, { attributes: true, attributeFilter: ['class'] });
     });
     layout();
 })();
