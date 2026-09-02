@@ -172,6 +172,49 @@ body.theme-light {
     --timeline-fade: rgba(235, 240, 248, 0.85);
 }
 
+/* Medium theme — a middle setting between light and dark: dark-family
+   panels (light text, like dark mode) but tinted with the teal / blue /
+   green family from the login backdrop instead of neutral slate. Only the
+   surface + tint tokens are overridden here; everything else inherits the
+   dark :root values. */
+body.theme-medium {
+    --panel-bg: rgba(14, 62, 74, 0.74);
+    --panel-border: rgba(120, 224, 208, 0.16);
+    --panel-shadow: 0 8px 40px rgba(2, 22, 28, 0.5), inset 0 1px 0 rgba(150, 245, 230, 0.08);
+    --chip-bg: rgba(130, 232, 214, 0.08);
+    --chip-border: rgba(130, 232, 214, 0.16);
+    --chip-text: rgba(214, 244, 239, 0.74);
+    --input-bg: rgba(6, 40, 48, 0.5);
+    --input-border: rgba(130, 232, 214, 0.18);
+    --facts-bg: rgba(130, 232, 214, 0.06);
+    --facts-border: rgba(130, 232, 214, 0.1);
+    --divider: rgba(130, 232, 214, 0.12);
+    --back-btn-bg: rgba(130, 232, 214, 0.08);
+    --back-btn-border: rgba(130, 232, 214, 0.16);
+    --scrollbar-thumb: rgba(130, 232, 214, 0.22);
+    --location-bg: rgba(130, 232, 214, 0.07);
+    --location-border: rgba(130, 232, 214, 0.13);
+    --nav-btn-bg: rgba(130, 232, 214, 0.12);
+    --nav-btn-bg-solid: rgba(12, 58, 68, 0.94);
+    --mp-bg: rgba(7, 34, 41, 0.96);
+    --top-search-bg: rgba(14, 62, 74, 0.74);
+    --top-search-border: rgba(130, 232, 214, 0.16);
+    --top-loading-bg: rgba(14, 62, 74, 0.74);
+    --collapsible-btn-bg: rgba(130, 232, 214, 0.08);
+    --collapsible-btn-border: rgba(130, 232, 214, 0.14);
+    --starter-chip-bg: rgba(130, 232, 214, 0.08);
+    --starter-chip-border: rgba(130, 232, 214, 0.13);
+    --voice-btn-bg: rgba(130, 232, 214, 0.08);
+    --voice-btn-border: rgba(130, 232, 214, 0.16);
+    --mp-img-bg: rgba(130, 232, 214, 0.06);
+    --timeline-fade: rgba(6, 34, 40, 0.85);
+    background:
+        radial-gradient(38% 48% at 22% 32%, rgba(47, 158, 107, 0.5) 0%, transparent 60%),
+        radial-gradient(32% 42% at 74% 22%, rgba(43, 143, 125, 0.5) 0%, transparent 58%),
+        radial-gradient(44% 52% at 68% 82%, rgba(28, 111, 156, 0.5) 0%, transparent 62%),
+        linear-gradient(160deg, #0b3b5e 0%, #0e5568 45%, #0a4f57 100%);
+}
+
 /* ============== GLOBAL STYLES ============== */
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -251,7 +294,11 @@ body {
 
 .settings-popup {
     position: fixed;
-    z-index: 400;
+    /* Above the draggable panels: once #questionBox is dragged, the
+       draggable-panel code pins it at an inline z-index of 1000+ (BASE_Z in
+       js/main.js), which would otherwise bury this popup behind the search
+       container. */
+    z-index: 100000;
     width: 260px;
     padding: 16px;
     border-radius: 16px;
@@ -1384,6 +1431,9 @@ body.explore-detail-open #exploreCurate { display: none; }
 }
 .drag-handle:hover { opacity: 1; background: var(--chip-hover-bg); }
 .drag-handle:active { cursor: grabbing; }
+/* #edpTitleBar already has its close button in the top-right corner, so its
+   drag grip sits on the left instead. */
+.drag-handle.drag-handle-left { right: auto; left: 8px; }
 .drag-handle-dots {
     width: 10px;
     height: 16px;
@@ -1540,49 +1590,56 @@ body.theme-light .answer-hero p {
     transform: translateY(0);
     pointer-events: auto;
 }
+/* The image shows at its natural proportions (no fixed aspect-ratio crop) so
+   nothing is cut off — the frame just grows to whatever height the image
+   needs. On hover it lifts slightly above the panel for a closer look. */
 .current-image-frame {
     position: relative;
     width: 100%;
-    aspect-ratio: 4 / 3;
+    min-height: 40px;
     border-radius: 12px;
-    overflow: hidden;
     background: rgba(0,0,0,0.15);
     display: flex;
     align-items: center;
     justify-content: center;
+    overflow: visible;
 }
 .current-image-el {
     width: 100%;
-    height: 100%;
-    object-fit: cover;
+    height: auto;
+    max-height: 70vh;
+    object-fit: contain;
     display: block;
+    border-radius: 12px;
+    transition: transform 0.22s cubic-bezier(0.4,0,0.2,1), box-shadow 0.22s ease;
+}
+.current-image-frame:hover .current-image-el {
+    transform: scale(1.04);
+    box-shadow: 0 10px 30px rgba(0,0,0,0.38);
+    position: relative;
+    z-index: 2;
 }
 .current-image-placeholder {
     font-size: 36px;
     opacity: 0.4;
+    padding: 24px 0;
 }
+/* Caption sits under the image (not overlaid) and swaps to match whichever
+   image is currently shown — see selectMainImage / selectExploreDetailImage
+   in js/main.js. */
 .current-image-desc {
-    position: absolute;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    padding: 26px 12px 10px;
-    background: linear-gradient(to top, rgba(0,0,0,0.85), rgba(0,0,0,0));
-    color: #fff;
+    margin-top: 9px;
+    padding: 0 2px;
+    color: inherit;
+    opacity: 0.82;
     font-size: 12px;
-    line-height: 1.4;
-    display: -webkit-box;
-    -webkit-line-clamp: 6;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-    opacity: 0;
-    transform: translateY(6px);
-    transition: opacity 0.2s ease, transform 0.25s cubic-bezier(0.4,0,0.2,1);
-    pointer-events: none;
+    line-height: 1.45;
+    max-height: 8.5em;
+    overflow-y: auto;
+    scrollbar-width: thin;
 }
-.current-image-frame:hover .current-image-desc:not(:empty) {
-    opacity: 1;
-    transform: translateY(0);
+.current-image-desc:empty {
+    display: none;
 }
 .current-image-extra {
     display: grid;
@@ -1892,6 +1949,26 @@ body.mobile-sheet-expanded .mobile-sheet-toggle { transform: rotate(180deg); }
     padding-right: 46px;
 }
 #questionBox.centered #landingSuggestions { min-height: 0; overflow-y: auto; }
+
+/* Casual token-usage line in the landing search box — links to /usage.
+   When shown it takes over the "pinned to the bottom" job from the
+   disclaimer (the ~ rule below) so the two sit together at the base. */
+.usage-counter { display: none; }
+#questionBox.centered .usage-counter:not([hidden]) {
+    display: block;
+    margin-top: auto;
+    padding: 12px 46px 0;
+    font-size: 10px;
+    line-height: 1.4;
+    text-align: center;
+    color: var(--text-muted);
+    text-decoration: none;
+}
+#questionBox.centered .usage-counter:not([hidden]):hover { color: var(--text-secondary); }
+#questionBox.centered .usage-counter:not([hidden]) ~ .search-disclaimer {
+    margin-top: 4px;
+    padding-top: 0;
+}
 
 /* ============== SUGGESTION CHIPS ============== */
 .suggestion-chips-row {

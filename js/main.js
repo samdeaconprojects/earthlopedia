@@ -1165,8 +1165,138 @@ const lightTheme = [
     },
 ];
 
+// Dusk / twilight — the middle setting between the light (noon) and dark
+// (deep night) maps. Dimmed but not dark, tinted with the teal / blue-green
+// family that the medium app theme uses (see body.theme-medium in styles.css).
+const mediumTheme = [
+    { elementType: "geometry", stylers: [{ lightness: -12 }, { saturation: 8 }] },
+    { elementType: "labels.text.stroke", stylers: [{ color: "#0b262b" }, { weight: 2.5 }] },
+    { elementType: "labels.text.fill", stylers: [{ color: "#dcefec" }] },
+    {
+        featureType: "landscape.natural",
+        elementType: "geometry",
+        stylers: [{ lightness: -6 }, { saturation: 14 }],
+    },
+    {
+        featureType: "landscape.natural.landcover",
+        elementType: "geometry",
+        stylers: [{ lightness: -4 }, { saturation: 18 }],
+    },
+    {
+        featureType: "landscape.man_made",
+        elementType: "geometry",
+        stylers: [{ color: "#20323a" }],
+    },
+    {
+        featureType: "administrative",
+        elementType: "geometry.stroke",
+        stylers: [{ color: "#33555d" }],
+    },
+    {
+        featureType: "administrative.locality",
+        elementType: "labels.text.fill",
+        stylers: [{ color: "#ccf0ec" }],
+    },
+    {
+        featureType: "poi",
+        elementType: "labels.text.fill",
+        stylers: [{ color: "#aecdc6" }],
+    },
+    {
+        featureType: "poi.park",
+        elementType: "geometry",
+        stylers: [{ color: "#173a33" }],
+    },
+    {
+        featureType: "poi.park",
+        elementType: "labels.text.fill",
+        stylers: [{ color: "#8fd3bb" }],
+    },
+    {
+        featureType: "road",
+        elementType: "geometry",
+        stylers: [{ color: "#2b3f47" }],
+    },
+    {
+        featureType: "road",
+        elementType: "geometry.stroke",
+        stylers: [{ color: "#1b2a30" }],
+    },
+    {
+        featureType: "road",
+        elementType: "labels.text.fill",
+        stylers: [{ color: "#cadde0" }],
+    },
+    {
+        featureType: "road.highway",
+        elementType: "geometry",
+        stylers: [{ color: "#3a565f" }],
+    },
+    {
+        featureType: "road.highway",
+        elementType: "geometry.stroke",
+        stylers: [{ color: "#1b2a30" }],
+    },
+    {
+        featureType: "road.highway",
+        elementType: "labels.text.fill",
+        stylers: [{ color: "#b4ecdd" }],
+    },
+    {
+        featureType: "transit",
+        elementType: "geometry",
+        stylers: [{ color: "#283c44" }],
+    },
+    {
+        featureType: "water",
+        elementType: "geometry",
+        stylers: [{ color: "#0e3d49" }],
+    },
+    {
+        featureType: "water",
+        elementType: "labels.text.fill",
+        stylers: [{ color: "#9fc4c8" }],
+    },
+    {
+        featureType: "water",
+        elementType: "labels.text.stroke",
+        stylers: [{ color: "#0e3d49" }],
+    },
+];
+
 let googleMapsApiKey;
-let mapStyleIsLight = localStorage.getItem('earthlopedia-map-style') !== 'dark';
+
+// Map style: 'light' (noon), 'medium' (dusk), or 'dark' (deep night). The
+// map-style control cycles through all three and drags the app theme along
+// to match; auto-dark-mode picks one from the time of day.
+const MAP_STYLES = ['light', 'medium', 'dark'];
+const MAP_STYLE_ICON = { light: '🗺️', medium: '🌆', dark: '🌙' };
+let mapStyle = MAP_STYLES.includes(localStorage.getItem('earthlopedia-map-style'))
+    ? localStorage.getItem('earthlopedia-map-style')
+    : 'light';
+
+function mapThemeArray() {
+    if (mapStyle === 'dark') return darkTheme;
+    if (mapStyle === 'medium') return mediumTheme;
+    return lightTheme;
+}
+
+// Applies a map style unconditionally: repaints the map (unless Street View
+// is up), stores the choice, updates the toggle icon, and — unless
+// syncApp is false — brings the app theme along to match.
+function applyMapStyle(style, { syncApp = true } = {}) {
+    if (!MAP_STYLES.includes(style)) style = 'light';
+    mapStyle = style;
+    localStorage.setItem('earthlopedia-map-style', style);
+    const btn = document.getElementById('map-style-toggle');
+    if (btn) btn.textContent = MAP_STYLE_ICON[style];
+    if (typeof map !== 'undefined' && map && !map.getStreetView().getVisible()) {
+        map.setOptions({ styles: mapThemeArray() });
+    }
+    if (syncApp && currentAppTheme() !== style) {
+        applyAppTheme(style);
+    }
+}
 
 // ============== SETTINGS (popup on the main search container) ==============
 const ACCENT_PRESETS = {
@@ -1199,32 +1329,20 @@ function applyAccentColor(name) {
     });
 }
 
-// Applies whatever the auto-dark-mode schedule currently calls for. Treated
-// as "night" 7pm–7am local time. Only called when the setting is on, and
-// only actually flips the theme if it doesn't already match.
+// Applies whatever the auto-dark-mode schedule currently calls for, moving
+// the map style and the app theme together: light around midday, dark deep
+// at night, and the dusk / medium style in the hours between. Only called
+// when the setting is on, and only changes anything that isn't already right.
+// Runs before the Maps script has loaded too — applyMapStyle() just stores
+// the choice in that case, and initMap() reads mapThemeArray() when it builds.
 function applyAutoDarkMode() {
     if (!appSettings.autoDarkMode) return;
     const hour = new Date().getHours();
-    const isNight = hour >= 19 || hour < 7;
-    const wantLight = !isNight;
-    if (document.body.classList.contains('theme-light') !== wantLight) {
-        applyAppTheme(wantLight);
-    }
-    // Map style is driven by the mapStyleIsLight flag rather than
-    // toggleMapStyle() here — that function also re-derives the app theme
-    // from it, which would fight the applyAppTheme() call above. initMap()
-    // reads mapStyleIsLight when it first builds the map, so this also
-    // correctly primes a map that hasn't loaded yet (called before Google
-    // Maps' async script finishes).
-    if (mapStyleIsLight !== wantLight) {
-        mapStyleIsLight = wantLight;
-        localStorage.setItem('earthlopedia-map-style', mapStyleIsLight ? 'light' : 'dark');
-        const btn = document.getElementById('map-style-toggle');
-        if (btn) btn.textContent = mapStyleIsLight ? '🌙' : '🗺️';
-        if (typeof map !== 'undefined' && map && !map.getStreetView().getVisible()) {
-            map.setOptions({ styles: mapStyleIsLight ? lightTheme : darkTheme });
-        }
-    }
+    const want = (hour >= 20 || hour < 6) ? 'dark'
+        : (hour >= 9 && hour < 17) ? 'light'
+        : 'medium';
+    if (mapStyle !== want) applyMapStyle(want, { syncApp: false });
+    if (currentAppTheme() !== want) applyAppTheme(want);
 }
 
 function initSettingsUI() {
@@ -1392,7 +1510,6 @@ setInterval(applyAutoDarkMode, 5 * 60 * 1000);
 fetch('/getGoogleMapsApiKey')
     .then(response => response.json())
     .then(data => {
-        console.log("Received Google Maps API key:", data.key);
         googleMapsApiKey = data.key;
         loadGoogleMapsScript();
     })
@@ -1412,7 +1529,7 @@ function initMap() {
         center: { lat: 30, lng: -25 },
         zoom: 3,
         mapTypeId: "terrain",
-        styles: mapStyleIsLight ? lightTheme : darkTheme,
+        styles: mapThemeArray(),
         minZoom: 2,
     });
 
@@ -1462,7 +1579,7 @@ function initMap() {
         if (sv.getVisible()) {
             map.setOptions({ styles: [] });
         } else {
-            map.setOptions({ styles: mapStyleIsLight ? lightTheme : darkTheme });
+            map.setOptions({ styles: mapThemeArray() });
         }
     });
 
@@ -2412,6 +2529,32 @@ function showTimeline() {
     }));
 }
 
+// Casual token-usage line at the bottom of the landing search box (links to
+// /usage). Silently hides itself if the endpoint isn't reachable — e.g. a
+// logged-out visitor in metered mode — so it never gets in the way.
+async function refreshUsageCounter() {
+    const el = document.getElementById('usageCounter');
+    if (!el) return;
+    try {
+        const res = await fetch('/usage-summary');
+        if (!res.ok) { el.hidden = true; return; }
+        const d = await res.json();
+        const fmt = n => Number(n || 0).toLocaleString('en-US');
+        let text = '';
+        if (d.mode === 'metered' && !d.authed && d.anon) {
+            const left = Math.max(0, d.anon.limit - d.anon.used);
+            text = `Free pool today · ${fmt(d.anon.used)} / ${fmt(d.anon.limit)} tokens · ${fmt(left)} left`;
+        } else if (d.today) {
+            const r = d.today.requests;
+            text = `Today · ${fmt(d.today.tokens)} tokens over ${fmt(r)} ${r === 1 ? 'call' : 'calls'}`;
+        }
+        if (text) { el.textContent = text; el.hidden = false; }
+        else el.hidden = true;
+    } catch {
+        el.hidden = true;
+    }
+}
+
 function openSearch() {
     const qb = document.getElementById('questionBox');
     // A search is currently in flight: its eventual result will land in the
@@ -2453,6 +2596,7 @@ function openSearch() {
     hideCurrentImage();
     setTimeout(() => document.getElementById('questionInput').focus(), 300);
     updateExploreNav();
+    refreshUsageCounter();
 }
 
 function cancelSearch() {
@@ -2611,14 +2755,16 @@ async function askQuestion() {
         document.getElementById("displayedQuestion").innerText = wikipediaHint || question;
         const { imageUrl, articleUrl, extract } = await fetchWikipediaImage(wikipediaHint || question);
         processResponse(response, imageUrl, articleUrl, extract);
+        refreshUsageCounter();
     } catch (error) {
         clearStreamGhost();
         loader.classList.remove('showing');
         qb.classList.remove('searching');
         answerBox.style.display = '';
-        answerBox.innerHTML = error.message.includes('Daily limit')
+        answerBox.innerHTML = /daily limit|limit has been reached/i.test(error.message)
             ? error.message
             : "An error occurred: " + error.toString();
+        refreshUsageCounter();
     }
 
     if (statesStack.length > 0) {
@@ -2758,6 +2904,7 @@ function setCurrentImage(imageUrl, extraImages = [], description = '') {
     }
     img.src = imageUrl;
     img.style.display = '';
+    img.dataset.caption = description || '';
     placeholder.style.display = 'none';
     if (descEl) descEl.textContent = description || '';
     setExtraImages(extraImages);
@@ -2766,7 +2913,15 @@ function setCurrentImage(imageUrl, extraImages = [], description = '') {
 
 function setExtraImages(extraImages = []) {
     const container = document.getElementById('currentImageExtra');
-    container.innerHTML = extraImages.map(url => `<img src="${url}" alt="" onclick="selectMainImage(this.src)">`).join('');
+    container.innerHTML = '';
+    extraImages.forEach(it => {
+        const el = document.createElement('img');
+        el.src = extraImageUrl(it);
+        el.alt = '';
+        el.dataset.caption = extraImageCaption(it);
+        el.addEventListener('click', () => selectMainImage(el));
+        container.appendChild(el);
+    });
     // Thumbnails often finish loading after the street view slot below has
     // already been positioned — nudge it back into place now that the image
     // panel's height may have changed.
@@ -2777,21 +2932,25 @@ function setExtraImages(extraImages = []) {
 // Clicking a thumbnail swaps it with the main image, so the image that was
 // just displaced takes the clicked thumbnail's place instead of disappearing
 // — every image stays visible somewhere, just cycled between the two spots.
-function selectMainImage(url) {
+function selectMainImage(thumb) {
     const img = document.getElementById('currentImageEl');
     const placeholder = document.getElementById('currentImagePlaceholder');
-    const container = document.getElementById('currentImageExtra');
+    const descEl = document.getElementById('currentImageDesc');
+    const url = thumb && thumb.src;
     if (!url || url === img.src) return;
 
+    // Swap src + caption between the clicked thumbnail and the main image so
+    // the displaced image (and its description) stays visible in the grid.
     const prevMainSrc = img.src;
-    const thumb = Array.from(container.querySelectorAll('img')).find(el => el.src === url);
-    if (thumb && prevMainSrc) thumb.src = prevMainSrc;
+    const prevMainCaption = img.dataset.caption || '';
+    const newCaption = thumb.dataset.caption || '';
+    if (prevMainSrc) { thumb.src = prevMainSrc; thumb.dataset.caption = prevMainCaption; }
 
     img.src = url;
+    img.dataset.caption = newCaption;
     img.style.display = '';
     placeholder.style.display = 'none';
-    // No per-image description is fetched for extra images, so the overlay
-    // keeps showing the topic/location's description rather than clearing it.
+    if (descEl) descEl.textContent = newCaption;
 }
 
 function hideCurrentImage() {
@@ -2808,6 +2967,22 @@ function wikiFilename(url) {
     return decodeURIComponent(base.replace(/^\d+px-/, '')).toLowerCase();
 }
 
+// Turn a Wikipedia file name ("Rouen_Cathedral_facade_1890.jpg") into a
+// readable fallback caption ("Rouen Cathedral facade 1890") for thumbnails
+// the media-list API gives us no real caption for.
+function prettyImageName(url) {
+    let base = (url || '').split('?')[0].split('/').pop() || '';
+    try { base = decodeURIComponent(base); } catch (e) {}
+    return base
+        .replace(/^\d+px-/, '')
+        .replace(/\.(jpe?g|png|gif|webp|tiff?)$/i, '')
+        .replace(/[_-]+/g, ' ')
+        .trim();
+}
+
+// Each entry is { url, caption } — caption is the media-list caption when
+// Wikipedia provides one, otherwise a prettified file name, so selecting a
+// thumbnail can show a description that actually matches that image.
 async function fetchExtraImages(articleUrl, excludeUrl, limit = 3) {
     if (!articleUrl) return [];
     try {
@@ -2819,7 +2994,7 @@ async function fetchExtraImages(articleUrl, excludeUrl, limit = 3) {
         const items = (data.items || []).filter(it => it.type === 'image' && it.srcset?.length);
         const excludeName = wikiFilename(excludeUrl);
         const seen = new Set();
-        const urls = [];
+        const out = [];
         for (const it of items) {
             const src = it.srcset[it.srcset.length - 1]?.src || it.srcset[0]?.src;
             if (!src) continue;
@@ -2828,14 +3003,20 @@ async function fetchExtraImages(articleUrl, excludeUrl, limit = 3) {
             const name = wikiFilename(full);
             if (name === excludeName || seen.has(name)) continue;
             seen.add(name);
-            urls.push(full);
-            if (urls.length >= limit) break;
+            const caption = (it.caption?.text || '').trim() || prettyImageName(full);
+            out.push({ url: full, caption });
+            if (out.length >= limit) break;
         }
-        return urls;
+        return out;
     } catch (e) {
         return [];
     }
 }
+
+// Extra-image lists are sometimes plain URL strings (restored state, older
+// call sites) and sometimes { url, caption } objects — normalize both.
+function extraImageUrl(it) { return typeof it === 'string' ? it : (it && it.url) || ''; }
+function extraImageCaption(it) { return (it && typeof it === 'object' && it.caption) || ''; }
 
 async function fetchWikipediaImage(query) {
     const result = await fetchWikipediaSummary(query);
@@ -4471,16 +4652,23 @@ function openExploreDetail(discovery) {
         if (imageUrl) {
             img.src = imageUrl;
             img.style.display = '';
+            img.dataset.caption = extract || '';
             placeholder.style.display = 'none';
             document.getElementById('edpImagePanel')?.classList.add('visible');
         }
         if (extract) imgDesc.textContent = extract;
         if (articleUrl) {
-            fetchExtraImages(articleUrl, imageUrl).then(urls => {
+            fetchExtraImages(articleUrl, imageUrl).then(items => {
                 if (requestId !== exploreDetailRequestId) return;
-                document.getElementById('edpExtraImages').innerHTML = urls
-                    .map(u => `<img src="${u}" onclick="selectExploreDetailImage('${u.replace(/'/g, "\\'")}')">`)
-                    .join('');
+                const grid = document.getElementById('edpExtraImages');
+                grid.innerHTML = '';
+                items.forEach(it => {
+                    const el = document.createElement('img');
+                    el.src = extraImageUrl(it);
+                    el.dataset.caption = extraImageCaption(it);
+                    el.addEventListener('click', () => selectExploreDetailImage(el));
+                    grid.appendChild(el);
+                });
                 // The extra-images grid can grow the image panel after the
                 // street view thumbnail below it was already positioned —
                 // nudge it back into place, same as setExtraImages() does
@@ -4518,11 +4706,22 @@ function closeExploreDetail() {
     locStreetViewPano = null;
 }
 
-function selectExploreDetailImage(url) {
+function selectExploreDetailImage(thumb) {
     const img = document.getElementById('edpImg');
+    const descEl = document.getElementById('edpImgDesc');
+    const url = thumb && thumb.src;
+    if (!url || url === img.src) return;
+
+    const prevSrc = img.src;
+    const prevCaption = img.dataset.caption || '';
+    const newCaption = thumb.dataset.caption || '';
+    if (prevSrc) { thumb.src = prevSrc; thumb.dataset.caption = prevCaption; }
+
     img.src = url;
+    img.dataset.caption = newCaption;
     img.style.display = '';
     document.getElementById('edpImgPlaceholder').style.display = 'none';
+    if (descEl) descEl.textContent = newCaption;
 }
 
 // Keyed by discovery name -> Promise<discovery[]>, so hopping back to a place
@@ -5684,50 +5883,58 @@ function annotateLocationsInSummary(locations) {
 
 
 
+// The three app (container) theme modes, in cycle order. "medium" sits
+// between light and dark: dark-family panels tinted with the teal/blue/green
+// login palette (see body.theme-medium in css/styles.css).
+const APP_THEMES = ['light', 'medium', 'dark'];
+const THEME_ICON = { light: '🌙', medium: '🌊', dark: '☀️' };
+
+function currentAppTheme() {
+    if (document.body.classList.contains('theme-light')) return 'light';
+    if (document.body.classList.contains('theme-medium')) return 'medium';
+    return 'dark';
+}
+
 // Applies the app (container) theme unconditionally — used both by the
 // theme toggle itself and by the map toggle when it drives the app theme.
-function applyAppTheme(isLight) {
-    document.body.classList.toggle('theme-light', isLight);
+// Accepts a mode string ('light' | 'medium' | 'dark'); legacy boolean
+// callers (true = light, false = dark) are still honoured.
+function applyAppTheme(mode) {
+    if (mode === true) mode = 'light';
+    else if (mode === false) mode = 'dark';
+    if (!APP_THEMES.includes(mode)) mode = 'dark';
+    document.body.classList.toggle('theme-light', mode === 'light');
+    document.body.classList.toggle('theme-medium', mode === 'medium');
     const btn = document.getElementById('theme-toggle');
-    if (btn) btn.textContent = isLight ? '🌙' : '☀️';
-    localStorage.setItem('earthlopedia-theme', isLight ? 'light' : 'dark');
+    if (btn) btn.textContent = THEME_ICON[mode];
+    localStorage.setItem('earthlopedia-theme', mode);
     renderTimeline();
     applyShadingStyle();
 }
 
 // The app theme toggle is independent — it only affects the app's own
-// containers/panels, not the map.
+// containers/panels, not the map. Cycles light → medium → dark → light.
 function toggleTheme() {
-    const isLight = !document.body.classList.contains('theme-light');
-    applyAppTheme(isLight);
+    const next = APP_THEMES[(APP_THEMES.indexOf(currentAppTheme()) + 1) % APP_THEMES.length];
+    applyAppTheme(next);
 }
 
-// The map style toggle drives both: it sets the map's own style and, when
-// the app theme doesn't already match, brings the rest of the app along
-// with it too.
+// The map style toggle drives both: it cycles the map's own style
+// (light → medium → dark → light) and brings the app theme along to match.
 function toggleMapStyle() {
-    mapStyleIsLight = !mapStyleIsLight;
-    document.getElementById('map-style-toggle').textContent = mapStyleIsLight ? '🌙' : '🗺️';
-    localStorage.setItem('earthlopedia-map-style', mapStyleIsLight ? 'light' : 'dark');
-    if (!map.getStreetView().getVisible()) {
-        map.setOptions({ styles: mapStyleIsLight ? lightTheme : darkTheme });
-    }
-    if (document.body.classList.contains('theme-light') !== mapStyleIsLight) {
-        applyAppTheme(mapStyleIsLight);
-    }
+    applyMapStyle(MAP_STYLES[(MAP_STYLES.indexOf(mapStyle) + 1) % MAP_STYLES.length]);
 }
 
 (function() {
-    // Light is the default app theme; only an explicit "dark" in storage keeps dark mode.
-    if (localStorage.getItem('earthlopedia-theme') !== 'dark') {
-        document.body.classList.add('theme-light');
-        const btn = document.getElementById('theme-toggle');
-        if (btn) btn.textContent = '🌙';
-    }
-    if (mapStyleIsLight) {
-        const btn = document.getElementById('map-style-toggle');
-        if (btn) btn.textContent = '🌙';
-    }
+    // Light is the default app theme; an explicit "dark" or "medium" in storage wins.
+    const stored = localStorage.getItem('earthlopedia-theme');
+    const mode = APP_THEMES.includes(stored) ? stored : 'light';
+    document.body.classList.toggle('theme-light', mode === 'light');
+    document.body.classList.toggle('theme-medium', mode === 'medium');
+    const btn = document.getElementById('theme-toggle');
+    if (btn) btn.textContent = THEME_ICON[mode];
+    const mapBtn = document.getElementById('map-style-toggle');
+    if (mapBtn) mapBtn.textContent = MAP_STYLE_ICON[mapStyle];
 })();
 
 // ============== DRAGGABLE / RESIZABLE PANELS ==============
@@ -5756,7 +5963,14 @@ function toggleMapStyle() {
     // otherwise keep reapplying and land the panel somewhere that no longer
     // matches either the new default or an intentional drag.
     const LAYOUT_KEY = 'earthlopedia-panel-layout-v2';
-    const DRAGGABLE_IDS = ['questionBox', 'currentImagePanel', 'summaryTitleBar'];
+    // Explore mode hides #questionBox/#currentImagePanel/#summaryTitleBar and
+    // shows its own trio instead (see body.explore-mode in styles.css), so
+    // those get the same drag/resize grips. They're display:none until a
+    // discovery is opened — modeKey() below keys their saved geometry under
+    // 'open' so nothing is measured or reapplied while they're hidden.
+    const EXPLORE_DETAIL_DRAG_IDS = new Set(['edpTitleBar', 'edpSummaryPanel', 'edpImagePanel']);
+    const DRAGGABLE_IDS = ['questionBox', 'currentImagePanel', 'summaryTitleBar',
+        'edpTitleBar', 'edpSummaryPanel', 'edpImagePanel'];
     const BASE_Z = 1000; // comfortably above every panel's own stacking-context z-index
     let zCounter = BASE_Z;
     const lastMode = new WeakMap();
@@ -5771,13 +5985,22 @@ function toggleMapStyle() {
     // edge, 0.5 keeps it centered, 0 leaves it pinned to the left edge (the
     // default for any panel not listed here, matching #questionBox's own
     // "pinned to the left" CSS default).
-    const ANCHOR_FRACTION = { currentImagePanel: 1, summaryTitleBar: 0.5 };
+    const ANCHOR_FRACTION = {
+        currentImagePanel: 1, summaryTitleBar: 0.5,
+        edpImagePanel: 1, edpTitleBar: 0.5,
+    };
     let lastViewportWidth = window.innerWidth;
 
     // #questionBox alternates between the centered search layout and the
     // docked result layout; every other draggable panel has just one layout.
     function modeKey(panel) {
         if (panel.id === 'questionBox') return panel.classList.contains('centered') ? 'centered' : 'result';
+        // Explore-detail panels are display:none until a discovery is opened.
+        // Keying on `.visible` means the class flip openExploreDetail/
+        // closeExploreDetail does is what triggers watchModeChanges to apply
+        // (on open, when the panel finally has real dimensions) or clear (on
+        // close) the saved geometry — never while it's measuring as 0×0.
+        if (EXPLORE_DETAIL_DRAG_IDS.has(panel.id)) return panel.classList.contains('visible') ? 'open' : 'hidden';
         return 'default';
     }
 
@@ -6223,8 +6446,11 @@ function toggleMapStyle() {
         if (!isMobile() || qb.classList.contains('centered')) {
             if (!imgPanel.classList.contains('panel-repositioned')) imgPanel.style.top = '';
             if (!qb.classList.contains('panel-repositioned')) qb.style.top = '';
-            if (edpImgPanel) edpImgPanel.style.top = '';
-            if (edpSummaryPanel) edpSummaryPanel.style.top = '';
+            // Skip the clear for an explore-detail panel the user has dragged —
+            // same guard as the main trio above, or the drag only ever moves
+            // it sideways before layout() snaps its top back to the CSS default.
+            if (edpImgPanel && !edpImgPanel.classList.contains('panel-repositioned')) edpImgPanel.style.top = '';
+            if (edpSummaryPanel && !edpSummaryPanel.classList.contains('panel-repositioned')) edpSummaryPanel.style.top = '';
             return;
         }
         // A manually dragged panel already has an explicit position the
@@ -6246,10 +6472,14 @@ function toggleMapStyle() {
         }
         qb.style.top = nextTop + 'px';
 
-        // Explore detail panels aren't draggable and have no collapse
-        // toggle — when open, they're always all three at full height, so
-        // this is just a straight top-to-bottom chain.
-        if (edpTitleBar && edpImgPanel && edpSummaryPanel && edpTitleBar.classList.contains('visible')) {
+        // Explore detail panels have no collapse toggle — when open, they're
+        // always all three at full height, so this is just a straight
+        // top-to-bottom chain. A panel the user has dragged has an explicit
+        // position of its own, so leave the whole chain alone in that case
+        // (mirrors the main trio's guard above).
+        const edpRepositioned = [edpTitleBar, edpImgPanel, edpSummaryPanel]
+            .some((el) => el && el.classList.contains('panel-repositioned'));
+        if (!edpRepositioned && edpTitleBar && edpImgPanel && edpSummaryPanel && edpTitleBar.classList.contains('visible')) {
             let edpNextTop = edpTitleBar.getBoundingClientRect().bottom + GAP;
             edpImgPanel.style.top = edpNextTop + 'px';
             edpNextTop = edpImgPanel.getBoundingClientRect().bottom + GAP;

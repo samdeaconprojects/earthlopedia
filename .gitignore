@@ -4,6 +4,9 @@ node_modules/
 # Environment variables
 .env
 
+# Token-usage counter (written at runtime)
+usage-stats.json
+
 # Logs
 npm-debug.log*
 yarn-debug.log*

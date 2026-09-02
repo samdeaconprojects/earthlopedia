@@ -8,44 +8,437 @@ require('dotenv').config();
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-const DAILY_PROMPT_LIMIT = 10;
-const DAY_MS = 24 * 60 * 60 * 1000;
-const usage = new Map(); // visitorId -> { count, resetAt }
+app.use(express.json());
+app.use(express.urlencoded({ extended: false }));
 
-function getVisitorId(req, res) {
+// ---- Password gate + token metering ------------------------------------
+// Two modes, chosen by ANON_ACCESS:
+//   'blocked' (default) — the whole site needs the password. No-password
+//                         visitors are redirected to /login and can't reach
+//                         anything. The token counter still runs (all usage
+//                         lands under "password holders") so you can watch
+//                         spend at /usage.
+//   'metered'           — the site is public; visitors without the password
+//                         share ONE daily token pool (ANON_DAILY_TOKEN_LIMIT)
+//                         and are asked to log in once it's spent. Password
+//                         holders are always unlimited.
+// Auth is a cookie whose value is an HMAC keyed by SITE_PASSWORD itself, so
+// rotating the password logs everyone out.
+const SITE_PASSWORD = process.env.SITE_PASSWORD || '';
+const AUTH_COOKIE = 'site_auth';
+const AUTH_MAX_AGE_S = 30 * 24 * 60 * 60;
+const ANON_ACCESS = (process.env.ANON_ACCESS || 'blocked').toLowerCase() === 'metered' ? 'metered' : 'blocked';
+const ANON_DAILY_TOKEN_LIMIT = Math.max(0, parseInt(process.env.ANON_DAILY_TOKEN_LIMIT, 10) || 200000);
+const STATS_PATH = process.env.USAGE_STATS_PATH || path.join(__dirname, 'usage-stats.json');
+
+if (!SITE_PASSWORD) {
+    console.warn('SITE_PASSWORD is not set — the gate is OFF, everyone is an unlimited password holder (fine for local dev, NOT for a public deploy).');
+} else {
+    console.log(`Access mode: ${ANON_ACCESS === 'metered'
+        ? `metered — public, no-password visitors share ${ANON_DAILY_TOKEN_LIMIT} tokens/day`
+        : 'blocked — whole site requires the password'}`);
+}
+
+function authToken() {
+    return crypto.createHmac('sha256', SITE_PASSWORD).update('earthlopedia-gate-v1').digest('hex');
+}
+
+function safeEqual(a, b) {
+    const ab = Buffer.from(String(a));
+    const bb = Buffer.from(String(b));
+    return ab.length === bb.length && crypto.timingSafeEqual(ab, bb);
+}
+
+function isAuthed(req) {
+    if (!SITE_PASSWORD) return true;
     const cookies = Object.fromEntries(
         (req.headers.cookie || '').split(';').map(c => c.trim().split('=')).filter(p => p[0])
     );
-    let id = cookies.visitorId;
-    if (!id) {
-        id = crypto.randomUUID();
-        res.setHeader('Set-Cookie', `visitorId=${id}; Max-Age=${60 * 60 * 24 * 365}; Path=/; HttpOnly; SameSite=Lax`);
-    }
-    return id;
+    return !!cookies[AUTH_COOKIE] && safeEqual(cookies[AUTH_COOKIE], authToken());
 }
 
-function rateLimit(req, res, next) {
-    if (process.env.NODE_ENV !== 'production') {
-        next();
-        return;
+// ---- usage stats (the token counter) ----
+// In-memory, mirrored to STATS_PATH so it survives process restarts. On
+// Render's ephemeral disk it still resets on each redeploy unless STATS_PATH
+// points at an attached Disk — the console lines and /usage are the live view.
+const utcDay = () => new Date().toISOString().slice(0, 10);
+const zeroBucket = () => ({ input: 0, output: 0, requests: 0 });
+const emptyDay = () => ({ date: utcDay(), anon: zeroBucket(), auth: zeroBucket(), byEndpoint: {} });
+
+let stats = {
+    today: emptyDay(),
+    allTime: { anon: zeroBucket(), auth: zeroBucket(), byEndpoint: {}, since: utcDay() },
+    history: [],
+};
+try {
+    if (fs.existsSync(STATS_PATH)) {
+        const loaded = JSON.parse(fs.readFileSync(STATS_PATH, 'utf8'));
+        if (loaded && loaded.today && loaded.allTime) stats = loaded;
     }
-    const id = getVisitorId(req, res);
-    const now = Date.now();
-    let entry = usage.get(id);
-    if (!entry || entry.resetAt <= now) {
-        entry = { count: 0, resetAt: now + DAY_MS };
-        usage.set(id, entry);
+} catch (e) {
+    console.warn('Could not read usage stats:', e.message);
+}
+
+let statsSaveTimer = null;
+function saveStatsSoon() {
+    clearTimeout(statsSaveTimer);
+    statsSaveTimer = setTimeout(() => {
+        try { fs.writeFileSync(STATS_PATH, JSON.stringify(stats)); }
+        catch (e) { console.warn('Could not write usage stats:', e.message); }
+    }, 2000);
+}
+
+function rollDayIfNeeded() {
+    if (stats.today.date === utcDay()) return;
+    stats.history.unshift(stats.today);
+    stats.history = stats.history.slice(0, 60);
+    stats.today = emptyDay();
+    saveStatsSoon();
+}
+
+function anonTokensUsedToday() {
+    rollDayIfNeeded();
+    return stats.today.anon.input + stats.today.anon.output;
+}
+
+function recordUsage(endpoint, authed, usage) {
+    rollDayIfNeeded();
+    const input = (usage && usage.input_tokens) || 0;
+    const output = (usage && usage.output_tokens) || 0;
+    const who = authed ? 'auth' : 'anon';
+    for (const scope of [stats.today, stats.allTime]) {
+        scope[who].input += input;
+        scope[who].output += output;
+        scope[who].requests += 1;
+        const e = scope.byEndpoint[endpoint] || (scope.byEndpoint[endpoint] = zeroBucket());
+        e.input += input; e.output += output; e.requests += 1;
     }
-    if (entry.count >= DAILY_PROMPT_LIMIT) {
-        const minutesLeft = Math.ceil((entry.resetAt - now) / 60000);
-        res.status(429).json({ error: `Daily limit of ${DAILY_PROMPT_LIMIT} searches reached. Try again in ${minutesLeft} minutes.` });
-        return;
+    saveStatsSoon();
+    console.log(`[usage] ${endpoint} ${who} +${input}in/+${output}out | today: anon ${anonTokensUsedToday()}/${ANON_DAILY_TOKEN_LIMIT}, auth ${stats.today.auth.input + stats.today.auth.output}`);
+}
+
+// Guards every AI endpoint. Password holders always pass. In 'metered' mode a
+// no-password visitor is refused once the shared daily pool is spent; in
+// 'blocked' mode they never reach here (siteGate stops them first). The real
+// token spend is booked by recordUsage() after each call returns.
+function aiGate(req, res, next) {
+    req.authed = isAuthed(req);
+    if (!req.authed && ANON_ACCESS === 'metered' && SITE_PASSWORD && anonTokensUsedToday() >= ANON_DAILY_TOKEN_LIMIT) {
+        return res.status(429).json({
+            error: 'The shared daily free limit has been reached. Enter the password at /login for unlimited access, or try again tomorrow.',
+            limitReached: true,
+        });
     }
-    entry.count += 1;
     next();
 }
 
-app.use(express.json());
+function requireAuth(req, res, next) {
+    if (isAuthed(req)) return next();
+    if ((req.headers.accept || '').includes('text/html')) return res.redirect('/login');
+    res.status(401).json({ error: 'Password required.' });
+}
+
+// In 'blocked' mode this locks the entire site behind the password. Only the
+// login page, its assets, and /usage's own auth are reachable without a
+// session. Inert in 'metered' mode (the site is public there).
+const GATE_OPEN_PATH = /^\/(css|img)\//;
+function siteGate(req, res, next) {
+    if (ANON_ACCESS === 'metered' || isAuthed(req)) return next();
+    if (req.method === 'GET' && GATE_OPEN_PATH.test(req.path)) return next();
+    if ((req.headers.accept || '').includes('text/html')) return res.redirect('/login');
+    res.status(401).json({ error: 'This site is password protected. Visit /login.' });
+}
+
+function loginPage({ error } = {}) {
+    // Shares the app's real stylesheet + logo lockup so the gate reads as the
+    // same product. Always dark, over a blurred blue-green "Earth from space"
+    // backdrop painted with layered CSS gradients (no image asset).
+    return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Earthlopedia</title>
+<link rel="icon" type="image/svg+xml" href="/img/favicon.svg">
+<link rel="stylesheet" href="/css/styles.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Jeju+Myeongjo&display=swap" rel="stylesheet">
+<style>
+  /* Override the app's orange accent with purple, just on the gate. */
+  :root {
+      --accent: #9333ea; --accent-light: #a855f7; --accent-dark: #7e22ce;
+      --accent-rgb: 147,51,234; --accent-light-rgb: 168,85,247;
+  }
+  body { overflow: auto; display: flex; align-items: center; justify-content: center;
+         min-height: 100vh; padding: 24px; background: #061019; }
+  /* Blurred blue-green Earth-from-space backdrop — oversized so the blur
+     doesn't reveal soft edges. */
+  body::before {
+      content: ""; position: fixed; inset: -25%; z-index: -1;
+      background:
+          radial-gradient(38% 48% at 22% 32%, #2f9e6b 0%, transparent 60%),
+          radial-gradient(32% 42% at 74% 22%, #2b8f7d 0%, transparent 58%),
+          radial-gradient(44% 52% at 68% 82%, #1c6f9c 0%, transparent 62%),
+          radial-gradient(30% 40% at 12% 78%, #34b39a 0%, transparent 55%),
+          radial-gradient(28% 36% at 88% 62%, #256c8c 0%, transparent 55%),
+          linear-gradient(160deg, #0b3b5e 0%, #0e5568 45%, #0a4f57 100%);
+      filter: blur(90px) saturate(135%);
+  }
+  .login-shell { width: 100%; max-width: 460px; position: relative; }
+  .login-card {
+      padding: 30px 26px 24px; border-radius: 20px;
+      background: var(--top-search-bg); border: 1px solid var(--top-search-border);
+      box-shadow: var(--panel-shadow);
+      backdrop-filter: blur(40px) saturate(180%);
+      -webkit-backdrop-filter: blur(40px) saturate(180%);
+  }
+  .login-card .earth-title { display: flex; font-size: 28px; margin-bottom: 20px; }
+  .login-card .earth-logo { width: 50px; height: 50px; }
+  .login-card .earth-title-wordmark { height: 38px; }
+  .login-input-wrap { position: relative; flex: 1; min-width: 0; display: flex; }
+  .login-card .search-row input {
+      flex: 1; min-width: 0; padding: 12px 44px 12px 15px; border-radius: 12px; font-size: 15px;
+      border: 1px solid var(--input-border); background: var(--input-bg);
+      color: var(--input-text); outline: none; transition: border-color 0.2s;
+  }
+  .login-card .search-row input::placeholder { color: var(--input-placeholder); }
+  .login-card .search-row input:focus { border-color: rgba(var(--accent-rgb), 0.55); }
+  .login-eye {
+      position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
+      width: 34px; height: 34px; display: flex; align-items: center; justify-content: center;
+      border: 0; background: transparent; cursor: pointer; padding: 0;
+      color: var(--text-secondary); border-radius: 8px;
+  }
+  .login-eye:hover { color: var(--text-primary); }
+  .login-eye svg { width: 19px; height: 19px; display: block; }
+  .login-eye .eye-off { display: none; }
+  .login-eye.revealed .eye-on { display: none; }
+  .login-eye.revealed .eye-off { display: block; }
+  .login-card .ask-btn { padding: 12px 18px; font-size: 15px; }
+  .login-err { margin: 14px 2px 0; font-size: 13px; color: var(--accent); text-align: center; }
+</style>
+</head>
+<body>
+  <div class="login-shell">
+    <form class="login-card" method="POST" action="/login">
+      <div class="earth-title">
+        <span class="earth-logo" aria-hidden="true"><span class="earth-logo-inner"></span></span>
+        <img class="earth-title-wordmark" src="/img/LogoBoldWiggle.svg" alt="Earthlopedia">
+      </div>
+      <div class="search-row">
+        <div class="login-input-wrap">
+          <input id="pw" type="password" name="password" placeholder="Password" autofocus autocomplete="current-password" required>
+          <button type="button" id="pwToggle" class="login-eye" aria-label="Show password" title="Show password">
+            <svg class="eye-on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+            <svg class="eye-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.9 4.24A9.1 9.1 0 0 1 12 4c6.5 0 10 7 10 7a13.2 13.2 0 0 1-2.16 2.94M6.06 6.06A13.2 13.2 0 0 0 2 11s3.5 7 10 7a9.1 9.1 0 0 0 4-.94"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/><path d="m2 2 20 20"/></svg>
+          </button>
+        </div>
+        <button type="submit" class="ask-btn">Enter</button>
+      </div>
+      ${error ? `<div class="login-err">${error}</div>` : ''}
+    </form>
+  </div>
+  <script>
+    (function () {
+      var pw = document.getElementById('pw'), t = document.getElementById('pwToggle');
+      t.addEventListener('click', function () {
+        var show = pw.type === 'password';
+        pw.type = show ? 'text' : 'password';
+        t.classList.toggle('revealed', show);
+        t.setAttribute('aria-label', show ? 'Hide password' : 'Show password');
+        t.setAttribute('title', show ? 'Hide password' : 'Show password');
+        pw.focus();
+      });
+    })();
+  </script>
+</body>
+</html>`;
+}
+
+// Password-only dashboard for the token counter. Same look as the login page.
+function usagePage() {
+    rollDayIfNeeded();
+    const n = x => (x || 0).toLocaleString('en-US');
+    const t = stats.today, a = stats.allTime;
+    const anonToday = t.anon.input + t.anon.output;
+    const authToday = t.auth.input + t.auth.output;
+    const pct = ANON_DAILY_TOKEN_LIMIT ? Math.min(100, Math.round(anonToday / ANON_DAILY_TOKEN_LIMIT * 100)) : 0;
+
+    const endpointRows = Object.entries(t.byEndpoint)
+        .sort((x, y) => (y[1].input + y[1].output) - (x[1].input + x[1].output))
+        .map(([name, e]) => `<tr><td>${name}</td><td>${n(e.requests)}</td><td>${n(e.input)}</td><td>${n(e.output)}</td><td>${n(e.input + e.output)}</td></tr>`)
+        .join('') || '<tr><td colspan="5" class="muted">No calls yet today.</td></tr>';
+
+    const historyRows = stats.history.slice(0, 14)
+        .map(d => `<tr><td>${d.date}</td><td>${n(d.anon.input + d.anon.output)}</td><td>${n(d.auth.input + d.auth.output)}</td><td>${n(d.anon.requests + d.auth.requests)}</td></tr>`)
+        .join('') || '<tr><td colspan="4" class="muted">No previous days recorded.</td></tr>';
+
+    return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="refresh" content="30">
+<title>Earthlopedia · Usage</title>
+<link rel="icon" type="image/svg+xml" href="/img/favicon.svg">
+<link rel="stylesheet" href="/css/styles.css">
+<link href="https://fonts.googleapis.com/css2?family=Jeju+Myeongjo&display=swap" rel="stylesheet">
+<style>
+  :root { --accent: #9333ea; --accent-rgb: 147,51,234; }
+  body { overflow: auto; display: flex; justify-content: center; min-height: 100vh; padding: 32px 24px; background: #061019; }
+  body::before {
+      content: ""; position: fixed; inset: -25%; z-index: -1;
+      background:
+          radial-gradient(38% 48% at 22% 32%, #2f9e6b 0%, transparent 60%),
+          radial-gradient(44% 52% at 68% 82%, #1c6f9c 0%, transparent 62%),
+          radial-gradient(30% 40% at 12% 78%, #34b39a 0%, transparent 55%),
+          linear-gradient(160deg, #0b3b5e 0%, #0e5568 45%, #0a4f57 100%);
+      filter: blur(90px) saturate(135%);
+  }
+  .u-shell { width: 100%; max-width: 640px; }
+  .u-card {
+      padding: 26px 26px 22px; border-radius: 20px; margin-bottom: 18px;
+      background: var(--top-search-bg); border: 1px solid var(--top-search-border);
+      box-shadow: var(--panel-shadow);
+      backdrop-filter: blur(40px) saturate(180%); -webkit-backdrop-filter: blur(40px) saturate(180%);
+  }
+  .u-card .earth-title { display: flex; font-size: 24px; margin: 0 0 4px; }
+  .u-card .earth-logo { width: 40px; height: 40px; }
+  .u-card .earth-title-wordmark { height: 30px; }
+  .u-tag { text-align: center; color: var(--text-secondary); font-size: 12px; letter-spacing: 2px; text-transform: uppercase; margin: 0 0 4px; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 1.5px; color: var(--text-secondary); margin: 0 0 12px; }
+  .u-stat-row { display: flex; gap: 14px; flex-wrap: wrap; }
+  .u-stat { flex: 1; min-width: 150px; background: var(--facts-bg); border: 1px solid var(--facts-border); border-radius: 12px; padding: 12px 14px; }
+  .u-stat .k { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted); }
+  .u-stat .v { font-size: 20px; font-weight: 600; margin-top: 3px; }
+  .u-stat .sub { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
+  .u-bar { height: 8px; border-radius: 5px; background: var(--facts-bg); overflow: hidden; margin: 10px 0 4px; }
+  .u-bar > span { display: block; height: 100%; background: var(--accent); width: ${pct}%; }
+  .u-bar-label { font-size: 12px; color: var(--text-secondary); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: right; padding: 7px 8px; border-bottom: 1px solid var(--divider); }
+  th:first-child, td:first-child { text-align: left; }
+  th { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted); font-weight: 600; }
+  .muted { color: var(--text-muted); text-align: center; }
+  .u-foot { text-align: center; font-size: 12px; color: var(--text-secondary); }
+  .u-foot a { color: var(--accent-light, var(--accent)); }
+</style>
+</head>
+<body>
+  <div class="u-shell">
+    <div class="u-card">
+      <div class="earth-title">
+        <span class="earth-logo" aria-hidden="true"><span class="earth-logo-inner"></span></span>
+        <img class="earth-title-wordmark" src="/img/LogoBoldWiggle.svg" alt="Earthlopedia">
+      </div>
+      <p class="u-tag">Token usage</p>
+    </div>
+
+    <div class="u-card">
+      <h2>Today · ${t.date} (UTC)</h2>
+      <div class="u-stat-row">
+        <div class="u-stat">
+          <div class="k">Free pool (no password)</div>
+          <div class="v">${n(anonToday)} / ${n(ANON_DAILY_TOKEN_LIMIT)}</div>
+          <div class="u-bar"><span></span></div>
+          <div class="u-bar-label">${pct}% used · ${n(t.anon.requests)} requests</div>
+        </div>
+        <div class="u-stat">
+          <div class="k">Password holders</div>
+          <div class="v">${n(authToday)}</div>
+          <div class="sub">tokens · ${n(t.auth.requests)} requests · unlimited</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="u-card">
+      <h2>All time · since ${a.since || t.date}</h2>
+      <div class="u-stat-row">
+        <div class="u-stat"><div class="k">No-password tokens</div><div class="v">${n(a.anon.input + a.anon.output)}</div><div class="sub">${n(a.anon.requests)} requests</div></div>
+        <div class="u-stat"><div class="k">Password tokens</div><div class="v">${n(a.auth.input + a.auth.output)}</div><div class="sub">${n(a.auth.requests)} requests</div></div>
+        <div class="u-stat"><div class="k">Total tokens</div><div class="v">${n(a.anon.input + a.anon.output + a.auth.input + a.auth.output)}</div><div class="sub">in ${n(a.anon.input + a.auth.input)} · out ${n(a.anon.output + a.auth.output)}</div></div>
+      </div>
+    </div>
+
+    <div class="u-card">
+      <h2>By endpoint · today</h2>
+      <table>
+        <thead><tr><th>Endpoint</th><th>Reqs</th><th>Input</th><th>Output</th><th>Total</th></tr></thead>
+        <tbody>${endpointRows}</tbody>
+      </table>
+    </div>
+
+    <div class="u-card">
+      <h2>Last 14 days</h2>
+      <table>
+        <thead><tr><th>Date (UTC)</th><th>No-pw tokens</th><th>Pw tokens</th><th>Reqs</th></tr></thead>
+        <tbody>${historyRows}</tbody>
+      </table>
+    </div>
+
+    <p class="u-foot">Auto-refreshes every 30s · <a href="/usage?format=json">JSON</a> · <a href="/">back to Earthlopedia</a></p>
+  </div>
+</body>
+</html>`;
+}
+
+app.get('/usage', requireAuth, (req, res) => {
+    rollDayIfNeeded();
+    if (req.query.format === 'json') {
+        return res.json({ anonDailyTokenLimit: ANON_DAILY_TOKEN_LIMIT, anonTokensUsedToday: anonTokensUsedToday(), ...stats });
+    }
+    res.type('html').send(usagePage());
+});
+
+// Tiny aggregate for the in-app counter in the search box. Public (no
+// password) so it also works for metered-mode visitors; only ever exposes
+// today's rolled-up totals, never per-visitor or historical data.
+app.get('/usage-summary', (req, res) => {
+    const authed = isAuthed(req);
+    if (ANON_ACCESS === 'blocked' && !authed) return res.status(401).json({ error: 'Password required.' });
+    rollDayIfNeeded();
+    const t = stats.today;
+    const out = {
+        mode: ANON_ACCESS,
+        authed,
+        today: {
+            tokens: t.anon.input + t.anon.output + t.auth.input + t.auth.output,
+            requests: t.anon.requests + t.auth.requests,
+        },
+    };
+    if (ANON_ACCESS === 'metered') {
+        out.anon = { used: t.anon.input + t.anon.output, limit: ANON_DAILY_TOKEN_LIMIT };
+    }
+    res.json(out);
+});
+
+app.get('/login', (req, res) => {
+    if (isAuthed(req)) return res.redirect('/');
+    res.type('html').send(loginPage());
+});
+
+app.post('/login', (req, res) => {
+    const password = (req.body && req.body.password) || '';
+    if (SITE_PASSWORD && safeEqual(password, SITE_PASSWORD)) {
+        const secure = req.secure || req.headers['x-forwarded-proto'] === 'https';
+        res.setHeader('Set-Cookie',
+            `${AUTH_COOKIE}=${authToken()}; Max-Age=${AUTH_MAX_AGE_S}; Path=/; HttpOnly; SameSite=Lax${secure ? '; Secure' : ''}`);
+        return res.redirect('/');
+    }
+    res.status(401).type('html').send(loginPage({ error: 'Incorrect password.' }));
+});
+
+app.post('/logout', (req, res) => {
+    res.setHeader('Set-Cookie', `${AUTH_COOKIE}=; Max-Age=0; Path=/; HttpOnly; SameSite=Lax`);
+    res.redirect('/login');
+});
+
+// Everything below this line is behind the gate in 'blocked' mode.
+app.use(siteGate);
+
+// ---- end password + metering setup ------------------------------------------
+
 app.use('/html', express.static(path.join(__dirname, 'html')));
 app.use('/css', express.static(path.join(__dirname, 'css')));
 app.use('/js', express.static(path.join(__dirname, 'js')));
@@ -56,7 +449,7 @@ app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'html', 'index.html'));
 });
 
-app.post('/ask', rateLimit, async (req, res) => {
+app.post('/ask', aiGate, async (req, res) => {
     try {
         const question = req.body.question;
         const detailLevel = Math.min(5, Math.max(1, parseInt(req.body.detailLevel) || 4));
@@ -207,7 +600,8 @@ Use the precise Wikipedia article title (with disambiguation if needed), e.g. "R
             res.write(`data: ${JSON.stringify({ chunk: text })}\n\n`);
         });
 
-        await stream.finalMessage();
+        const finalMessage = await stream.finalMessage();
+        recordUsage('ask', req.authed, finalMessage.usage);
         const answer = fullText.trim();
         console.log("=== RAW ANSWER ===\n", answer, "\n==================");
         res.write(`data: ${JSON.stringify({ done: true, answer })}\n\n`);
@@ -219,7 +613,7 @@ Use the precise Wikipedia article title (with disambiguation if needed), e.g. "R
     }
 });
 
-app.post('/location-summary', async (req, res) => {
+app.post('/location-summary', aiGate, async (req, res) => {
     try {
         const { question, locationName, event, year } = req.body;
         const yearStr = year != null ? (year < 0 ? `${Math.abs(year)} BCE` : String(year)) : null;
@@ -234,6 +628,7 @@ app.post('/location-summary', async (req, res) => {
             }],
         });
 
+        recordUsage('location-summary', req.authed, response.usage);
         const raw = response.content[0].text.trim();
         let summary = raw;
         let followUps = [];
@@ -260,7 +655,7 @@ app.post('/location-summary', async (req, res) => {
 // Deliberately narrow — only flags a clear, specific contradiction (a
 // conflicting date/name/place/number for the same fact), never omissions or
 // differing detail, so it stays a rare, trustworthy signal rather than noise.
-app.post('/fact-check', async (req, res) => {
+app.post('/fact-check', aiGate, async (req, res) => {
     try {
         const { summary, extract } = req.body || {};
         if (typeof summary !== 'string' || typeof extract !== 'string' || !summary.trim() || !extract.trim()) {
@@ -290,6 +685,7 @@ or
             }],
         });
 
+        recordUsage('fact-check', req.authed, response.usage);
         const raw = response.content[0].text.trim();
         const start = raw.indexOf('{');
         const end = raw.lastIndexOf('}');
@@ -305,7 +701,7 @@ or
     }
 });
 
-app.post('/followup-quick-answer', async (req, res) => {
+app.post('/followup-quick-answer', aiGate, async (req, res) => {
     try {
         const { question, locationName, event, year, followUp } = req.body;
         const yearStr = year != null ? (year < 0 ? `${Math.abs(year)} BCE` : String(year)) : null;
@@ -320,6 +716,7 @@ app.post('/followup-quick-answer', async (req, res) => {
             }],
         });
 
+        recordUsage('followup-quick-answer', req.authed, response.usage);
         const answer = response.content[0].text.trim();
         res.json({ answer });
     } catch (error) {
@@ -363,7 +760,7 @@ function buildExploreCuration(focus, categories) {
     return { cleanFocus, focusBlock, focusMatchField, categoryLine, allowedCats };
 }
 
-app.post('/explore-nearby', async (req, res) => {
+app.post('/explore-nearby', aiGate, async (req, res) => {
     try {
         const { lat, lng, north, south, east, west, exclude, focus, categories } = req.body || {};
         if ([lat, lng, north, south, east, west].some(n => typeof n !== 'number' || Number.isNaN(n))) {
@@ -413,6 +810,7 @@ Reply with ONLY a JSON array, nothing else — no preamble, no markdown fences:
 [{"name": "...", "lat": 0.0, "lng": 0.0, "teaser": "...", "category": "history"${focusMatchField}}]`
             }],
         });
+        recordUsage('explore-nearby', req.authed, response.usage);
 
         const raw = response.content[0].text.trim();
         const start = raw.indexOf('[');
@@ -461,7 +859,7 @@ Reply with ONLY a JSON array, nothing else — no preamble, no markdown fences:
 // /explore-nearby) these are free to be anywhere on the map. Each one quick-
 // loads into the same lightweight detail view client-side; see
 // renderExploreFollowUps/quickLoadExploreFollowUp in js/main.js.
-app.post('/explore-related', async (req, res) => {
+app.post('/explore-related', aiGate, async (req, res) => {
     try {
         const { name, teaser, exclude, focus, categories } = req.body || {};
         if (typeof name !== 'string' || !name.trim()) {
@@ -494,6 +892,7 @@ Reply with ONLY a JSON array, nothing else — no preamble, no markdown fences:
 [{"name": "...", "lat": 0.0, "lng": 0.0, "teaser": "...", "category": "history"}]`
             }],
         });
+        recordUsage('explore-related', req.authed, response.usage);
 
         const raw = response.content[0].text.trim();
         const start = raw.indexOf('[');
@@ -522,7 +921,7 @@ Reply with ONLY a JSON array, nothing else — no preamble, no markdown fences:
     }
 });
 
-app.get('/random-topic', async (req, res) => {
+app.get('/random-topic', aiGate, async (req, res) => {
     const type = req.query.type || 'route';
     const prompts = {
         route:     'Name one specific historical journey, migration, trade route, or expedition that can be traced on a map (e.g. "Marco Polo from Venice to Beijing", "the Polynesian migration across the Pacific"). Reply with only the topic phrase, no punctuation at the end, nothing else.',
@@ -539,6 +938,7 @@ app.get('/random-topic', async (req, res) => {
             temperature: 1,
             messages: [{ role: 'user', content: prompts[type] || prompts.route }],
         });
+        recordUsage('random-topic', req.authed, response.usage);
         res.json({ topic: response.content[0].text.trim() });
     } catch {
         res.status(500).json({ topic: null });
@@ -730,7 +1130,7 @@ if (process.env.NODE_ENV !== 'production') {
         }
     });
 
-    app.post('/tools/generate-prompts', async (req, res) => {
+    app.post('/tools/generate-prompts', aiGate, async (req, res) => {
         try {
             const { description, count, existing } = req.body || {};
             if (!description || typeof description !== 'string') {
@@ -752,6 +1152,7 @@ if (process.env.NODE_ENV !== 'production') {
                 }],
             });
 
+            recordUsage('tools/generate-prompts', req.authed, response.usage);
             const raw = response.content[0].text.trim();
             const start = raw.indexOf('[');
             const end = raw.lastIndexOf(']');

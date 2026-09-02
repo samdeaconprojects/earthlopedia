@@ -134,8 +134,8 @@
         <div class="current-image-frame">
             <img id="currentImageEl" class="current-image-el" src="" alt="" style="display:none">
             <div id="currentImagePlaceholder" class="current-image-placeholder">🌍</div>
-            <div id="currentImageDesc" class="current-image-desc"></div>
         </div>
+        <div id="currentImageDesc" class="current-image-desc"></div>
         <div id="currentImageExtra" class="current-image-extra"></div>
     </div>
     <!-- Its own floating card below #currentImagePanel — position/width are
@@ -221,6 +221,7 @@
                     </div>
                 </div>
             </div>
+            <a id="usageCounter" class="usage-counter" href="/usage" target="_blank" rel="noopener" hidden></a>
             <div id="searchDisclaimer" class="search-disclaimer">Results are built on Claude and Wikipedia information which can produce incorrect or inappropriate information.</div>
         </div>
         <div id="summaryContent" class="summary-content">
@@ -259,24 +260,24 @@
         <div class="settings-popup-title">Settings</div>
         <div class="settings-row">
             <label for="settingAutoDark" class="settings-label">
-                <span>Auto dark mode at night</span>
-                <span class="settings-sublabel">Switches the app (and map) to dark theme in the evening</span>
+                <span>Auto theme by time of day</span>
+                <span class="settings-sublabel">Light around midday, dusk in the evening, dark at night — map and app together</span>
             </label>
             <input type="checkbox" id="settingAutoDark" class="settings-toggle-input" checked onchange="updateSetting('autoDarkMode', this.checked)">
         </div>
         <div class="settings-row">
             <label class="settings-label">
                 <span>App theme</span>
-                <span class="settings-sublabel">Light or dark panels and controls</span>
+                <span class="settings-sublabel">Cycle light, medium, and dark panels</span>
             </label>
-            <button id="theme-toggle" class="settings-icon-btn" onclick="toggleTheme()" title="Toggle app theme">☀️</button>
+            <button id="theme-toggle" class="settings-icon-btn" onclick="toggleTheme()" title="Cycle app theme (light / medium / dark)">☀️</button>
         </div>
         <div class="settings-row">
             <label class="settings-label">
                 <span>Map style</span>
-                <span class="settings-sublabel">Light or dark map — also sets the app theme to match</span>
+                <span class="settings-sublabel">Cycle noon, dusk, and night maps — also sets the app theme to match</span>
             </label>
-            <button id="map-style-toggle" class="settings-icon-btn" onclick="toggleMapStyle()" title="Toggle map style">🗺️</button>
+            <button id="map-style-toggle" class="settings-icon-btn" onclick="toggleMapStyle()" title="Cycle map style (noon / dusk / night)">🗺️</button>
         </div>
         <div class="settings-row settings-row-col">
             <label for="settingZoom" class="settings-label">
@@ -325,12 +326,15 @@
          (.loc-focus-title, .current-image-frame, .mp-cta, …) for a visually
          consistent look without duplicating that styling. -->
     <div id="edpTitleBar" class="explore-detail-titlebar">
+        <button class="drag-handle drag-handle-left" title="Drag to move" aria-label="Move panel"><span class="drag-handle-dots"></span></button>
         <button class="mp-close explore-detail-close" onclick="closeExploreDetail()" title="Back to exploring" aria-label="Close">&times;</button>
         <span id="edpCategory" class="explore-detail-category"></span>
         <div id="edpTitle" class="loc-focus-title"></div>
         <div id="edpCoords" class="loc-focus-coords"></div>
     </div>
     <div id="edpSummaryPanel" class="explore-detail-summary-panel">
+        <button class="drag-handle" title="Drag to move" aria-label="Move panel"><span class="drag-handle-dots"></span></button>
+        <button class="resize-handle" title="Drag to resize" aria-label="Resize panel"><span class="resize-handle-icon"></span></button>
         <div id="edpSummary" class="loc-focus-summary explore-detail-summary"></div>
         <button id="edpDeepDiveBtn" class="mp-cta explore-detail-deepdive-btn" onclick="deepDiveExploreDetail()">Full search deep dive →</button>
         <div id="edpSimilarSection" class="explore-detail-similar">
@@ -339,11 +343,13 @@
         </div>
     </div>
     <div id="edpImagePanel" class="explore-detail-image-panel">
+        <button class="drag-handle" title="Drag to move" aria-label="Move panel"><span class="drag-handle-dots"></span></button>
+        <button class="resize-handle" title="Drag to resize" aria-label="Resize panel"><span class="resize-handle-icon"></span></button>
         <div class="current-image-frame">
             <img id="edpImg" class="current-image-el" src="" alt="" style="display:none">
             <div id="edpImgPlaceholder" class="current-image-placeholder">🌍</div>
-            <div id="edpImgDesc" class="current-image-desc"></div>
         </div>
+        <div id="edpImgDesc" class="current-image-desc"></div>
         <div id="edpExtraImages" class="current-image-extra"></div>
     </div>
 </body>
