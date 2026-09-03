@@ -12,7 +12,7 @@ const RANDOM_QUESTIONS = [
     "Show every territory the Roman Empire controlled at its absolute peak",
     "Where did Viking settlements stretch from Scandinavia to North America?",
     "Trace the Silk Road's branching routes from Rome all the way to Chang'an",
-    "Map exactly where the Black Death spread year by year from 1347 to 1353",
+    "Map where the Black Death spread year by year from 1347 to 1353",
     "Show every battle Alexander the Great fought across three continents",
     "Where did Buddhism spread from its origin in Nepal across Asia?",
     "Map where the Mongol Empire expanded under each successive Khan",
@@ -87,7 +87,7 @@ const RANDOM_QUESTIONS = [
 const FAVORITE_QUESTIONS = [
     "Trace every stop on Marco Polo's 24-year journey from Venice to Beijing",
     "Show the route Magellan's crew took to circumnavigate the globe",
-    "Map exactly where the Black Death spread year by year from 1347 to 1353",
+    "Map where the Black Death spread year by year from 1347 to 1353",
     "Show every battle Alexander the Great fought across three continents",
     "Trace the Lewis and Clark expedition from St. Louis to the Pacific",
     "The underground cities carved five stories deep beneath Cappadocia, Turkey",
@@ -490,9 +490,10 @@ const EXPLORE_BAR_PROMPTS = [
 const EXPLORE_BAR_REVEAL_DELAY = 2500;
 
 // The typed-out example questions are a load-in flourish only — once the user
-// has actually engaged Explore (opened Curate, ran a curated search), retire
-// the animation for good and let the bar settle to its wordmark / live-status
-// resting state. See stopExploreBarTypewriter callers.
+// has actually engaged Explore (panned/zoomed to pull a discovery batch,
+// opened Curate, ran a curated search), retire the animation for good and let
+// the bar settle to its wordmark / live-status resting state. See
+// stopExploreBarTypewriter callers.
 let exploreBarTypewriterStopped = false;
 // The example question the bar is currently typing out / holding on screen.
 // Clicking the bar to open search carries this into the search field so the
@@ -3023,14 +3024,61 @@ async function fetchWikipediaImage(query) {
     return { imageUrl: result.imageUrl, articleUrl: result.articleUrl, extract: result.extract };
 }
 
-// Memoizes fetchWikipediaImage per discovery object (caching the in-flight
-// promise, not just the result, so calls that race each other share one
-// fetch) — the marker pin thumbnail, the hover popout, and the detail panel
-// all want the same discovery's image, and without this each would issue
-// its own redundant Wikipedia lookup.
+// Wikipedia lookup for an Explore discovery. Unlike a plain name lookup this
+// (a) hands over the discovery's coordinates so an ambiguous or transliterated
+// name resolves to the article about *this* place rather than a same-named one
+// elsewhere, and (b) retries with looser forms of the name — parentheticals
+// stripped, then the part before the first comma — since the model often
+// returns "Qasr al-Hayr al-Sharqi (Eastern Palace), Homs" style names that no
+// article is titled with. First variant that yields a photo wins; if none do,
+// the best article we saw is still returned so the write-up/extract survives.
+async function fetchDiscoveryWikipedia(discovery) {
+    const name = (discovery.name || '').trim();
+    const near = (typeof discovery.lat === 'number' && typeof discovery.lng === 'number')
+        ? { lat: discovery.lat, lng: discovery.lng }
+        : null;
+    const variants = [...new Set([
+        name,
+        name.replace(/\([^)]*\)/g, ' ').replace(/\s+/g, ' ').trim(),
+        name.split(',')[0].trim(),
+    ])].filter(v => v.length > 2);
+
+    let fallback = null;
+    for (const v of variants) {
+        const r = await fetchWikipediaSummary(v, { near, search: true });
+        if (r && r.imageUrl) return r;
+        if (r && !fallback && (r.articleUrl || r.extract)) fallback = r;
+    }
+    return fallback || { imageUrl: null, articleUrl: null, extract: null };
+}
+
+// Memoizes the discovery's Wikipedia lookup per discovery object (caching the
+// in-flight promise, not just the result, so calls that race each other share
+// one fetch) — the marker pin thumbnail, the hover popout, and the detail
+// panel all want the same discovery's image, and without this each would
+// issue its own redundant Wikipedia lookup.
 function getDiscoveryImageInfo(discovery) {
-    if (!discovery._imageInfoPromise) discovery._imageInfoPromise = fetchWikipediaImage(discovery.name);
+    if (!discovery._imageInfoPromise) discovery._imageInfoPromise = fetchDiscoveryWikipedia(discovery);
     return discovery._imageInfoPromise;
+}
+
+// The photo to show for a discovery: the article's own lead thumbnail when it
+// has one, otherwise the first usable picture from inside the article. Plenty
+// of smaller sites — exactly the ones Explore surfaces — have an article with
+// no thumbnail but images further down it, and those used to render as "this
+// place has no photo at all". Cached per discovery like the lookup above.
+function getDiscoveryLeadImage(discovery) {
+    if (!discovery._leadImagePromise) {
+        discovery._leadImagePromise = getDiscoveryImageInfo(discovery)
+            .then(async info => {
+                if (info.imageUrl) return info.imageUrl;
+                if (!info.articleUrl) return null;
+                const extras = await fetchExtraImages(info.articleUrl, null, 1);
+                return extras.length ? extras[0].url : null;
+            })
+            .catch(() => null);
+    }
+    return discovery._leadImagePromise;
 }
 
 async function fetchLocationImage(location) {
@@ -3057,18 +3105,35 @@ async function fetchLocationImage(location) {
         const cleanDesc = desc.replace(/\([^)]*\)/g, '').trim();
         if (cleanDesc) queries.push({ q: cleanDesc });
     }
-    queries.push({ q: place, near });
+    queries.push({ q: place, near, search: true });
 
-    for (const { q, near: qNear } of queries) {
-        const result = await fetchWikipediaSummary(q, { near: qNear });
+    for (const { q, near: qNear, search } of queries) {
+        const result = await fetchWikipediaSummary(q, { near: qNear, search });
         if (result.imageUrl) return result;
     }
     return { imageUrl: null, articleUrl: null, extract: null };
 }
 
+// Loose "are these the same thing?" test between a query and an article
+// title, ignoring case, accents and punctuation: "Bab al-Yemen, Sanaa" vs
+// "Bab al Yemen" yes, "Castillo de Loarre" vs "Castillo de la Real Fuerza" no.
+function wikiTitlePlausible(query, title) {
+    const norm = t => (t || '').toLowerCase()
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9]+/g, ' ').trim();
+    const q = norm(query), t = norm(title);
+    if (!q || !t) return false;
+    return q.includes(t) || t.includes(q);
+}
+
 async function fetchWikipediaSummary(query, opts = {}) {
     const STOP_WORDS = new Set(['the', 'a', 'an', 'of', 'in', 'on', 'at', 'to', 'for', 'and', 'or', 'why', 'did', 'how', 'where', 'what', 'is', 'was', 'were', 'i', 'want', 'me', 'show', 'tell', 'find', 'get', 'give']);
     const near = opts.near && typeof opts.near.lat === 'number' && typeof opts.near.lng === 'number' ? opts.near : null;
+    // Whether to fall back to Wikipedia's full-text search (see below). Only
+    // for queries that are the *name* of something; a descriptive phrase would
+    // match articles that merely contain those words ("underground cities
+    // carved five stories deep" → Weather Underground).
+    const allowFullText = opts.search === true;
     // Max degrees between a candidate article's own coordinates and the hinted
     // location before we stop trusting it as the same place (~220 km).
     const NEAR_LIMIT_DEG = 2;
@@ -3084,7 +3149,7 @@ async function fetchWikipediaSummary(query, opts = {}) {
         const coords = data.coordinates && typeof data.coordinates.lat === 'number'
             ? { lat: data.coordinates.lat, lng: data.coordinates.lon }
             : null;
-        if (src || articleUrl || extract) return { imageUrl: src || null, articleUrl, extract, coords };
+        if (src || articleUrl || extract) return { imageUrl: src || null, articleUrl, extract, coords, title: data.title };
         return null;
     }
 
@@ -3092,22 +3157,31 @@ async function fetchWikipediaSummary(query, opts = {}) {
     // one whose article sits near the hinted spot. Falls back to first-match
     // when no candidate has usable nearby coordinates (species, events, etc.).
     async function pickFromTitles(titles) {
-        if (!near) {
-            for (const title of titles) {
-                const result = await summaryForTitle(title);
-                if (result) return result;
-            }
-            return null;
-        }
         const results = (await Promise.all(titles.map(summaryForTitle))).filter(Boolean);
-        let best = null, bestDist = Infinity;
-        for (const r of results) {
-            if (!r.coords) continue;
-            const d = Math.hypot(r.coords.lat - near.lat, r.coords.lng - near.lng);
-            if (d < bestDist) { best = r; bestDist = d; }
+        if (!results.length) return null;
+        if (near) {
+            // Candidates whose own article coordinates sit near the hinted
+            // spot are the same place; among those prefer one with a photo
+            // (an illustrated article about the right place beats a bare
+            // stub about it), falling back to simply the closest.
+            const dist = r => Math.hypot(r.coords.lat - near.lat, r.coords.lng - near.lng);
+            const nearby = results
+                .filter(r => r.coords && dist(r) <= NEAR_LIMIT_DEG)
+                .sort((a, b) => dist(a) - dist(b));
+            if (nearby.length) return nearby.find(r => r.imageUrl) || nearby[0];
+            // Nothing sits near the hint. An article that carries coordinates
+            // far from it is demonstrably a different place (searching
+            // "Castillo de Loarre" surfaces Havana's Castillo de la Real
+            // Fuerza, illustrated and confidently wrong) — showing its photo
+            // is worse than showing none. What's left are articles with no
+            // coordinates to judge by, and those are only trusted when the
+            // title itself still reads as the place that was asked for.
+            const placeless = results.filter(r => !r.coords && wikiTitlePlausible(query, r.title));
+            return placeless.find(r => r.imageUrl) || placeless[0] || null;
         }
-        if (best && bestDist <= NEAR_LIMIT_DEG) return best;
-        return results.find(r => r.imageUrl) || results[0] || null;
+        // No coordinate hint (species, events, abstract topics): take the
+        // best-ranked candidate that has an image, else the top hit.
+        return results.find(r => r.imageUrl) || results[0];
     }
 
     try {
@@ -3119,6 +3193,24 @@ async function fetchWikipediaSummary(query, opts = {}) {
             const [, titles] = await searchRes.json();
             const result = await pickFromTitles(titles);
             if (result) return result;
+        }
+
+        // opensearch is a title-prefix matcher, so it misses outright whenever
+        // the name in hand isn't how the article is titled: "Wadi Rum
+        // Protected Area" returns nothing at all, and "Castillo de Loarre"
+        // returns three unrelated Cuban castles. Full-text search finds what
+        // those queries actually mean ("Wadi Rum", "Castle of Loarre"), so try
+        // it before falling back to chopping words off the query.
+        const fullTextRes = allowFullText
+            ? await fetch(`https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(q)}&srlimit=3&format=json&origin=*`)
+            : null;
+        if (fullTextRes && fullTextRes.ok) {
+            const data = await fullTextRes.json();
+            const titles = (data.query && data.query.search || []).map(hit => hit.title);
+            if (titles.length) {
+                const result = await pickFromTitles(titles);
+                if (result) return result;
+            }
         }
 
         // Fallback: strip leading stop/filler words and try direct page lookup
@@ -3334,6 +3426,9 @@ let exploreIdleListener = null;
 let exploreFetchInFlight = false;
 let explorePendingRecheck = false; // set when the map moved during an in-flight fetch; the fetch's
                                    // finally reschedules a check so the new viewport gets its own batch
+let explorePendingRetry = false;   // set when an uncurated batch came back empty; the fetch's finally
+                                   // runs one more attempt for the same viewport (Haiku is streaky —
+                                   // a bare "nothing here" is usually the model, not the map)
 let exploreLastBounds = null;      // {n,s,e,w} of the bounds last fetched for
 let activeExploreDiscovery = null; // set while #marker-popout is showing a discovery, not a search location
 let exploreDetailDiscovery = null; // the discovery the explore detail panels currently show, if open
@@ -4023,7 +4118,7 @@ function enterExploreMode() {
     // Maps' own tile-load heuristics and was observed to sometimes not fire
     // at all after a purely programmatic zoom. Debouncing ourselves also
     // naturally coalesces a whole drag/zoom gesture into one check.
-    exploreIdleListener = map.addListener('bounds_changed', scheduleExploreCheck);
+    attachExploreBoundsListener();
     scheduleExploreCheck(true);
     updateExploreNav();
 }
@@ -4147,7 +4242,7 @@ function resumeExploreMode() {
     // relaxed first-fetch zoom floor no longer applies.
     exploreEntryZoom = map.getZoom();
     exploreFirstFetchDone = exploreMarkers.length > 0 || exploreShownNames.length > 0;
-    exploreIdleListener = map.addListener('bounds_changed', scheduleExploreCheck);
+    attachExploreBoundsListener();
     updateExploreNav();
 }
 
@@ -4239,18 +4334,24 @@ function pickExplorePlaceLabel(results, { coarse = false } = {}) {
     return context ? `${primary}, ${context}` : primary;
 }
 
+// Resolves to the label ('' when geocoding is unavailable or finds nothing).
+// spawnDiscoveries awaits it so the label can go to the server with the batch
+// request, not just into the status line.
 function refreshExploreCenterPlace(onResolved, { coarse = false } = {}) {
-    if (!window.google || !google.maps || !google.maps.Geocoder || !map) return;
-    if (!exploreGeocoder) exploreGeocoder = new google.maps.Geocoder();
-    const center = map.getCenter();
-    if (!center) return;
-    const token = ++exploreGeocodeToken;
-    exploreGeocoder.geocode({ location: center }, (results, status) => {
-        if (token !== exploreGeocodeToken) return;   // a newer refresh superseded this one
-        if (status !== 'OK' || !results || !results.length) { exploreCenterPlace = ''; return; }
-        const label = pickExplorePlaceLabel(results, { coarse });
-        exploreCenterPlace = label;
-        if (label && typeof onResolved === 'function') onResolved(label);
+    return new Promise(resolve => {
+        if (!window.google || !google.maps || !google.maps.Geocoder || !map) { resolve(''); return; }
+        if (!exploreGeocoder) exploreGeocoder = new google.maps.Geocoder();
+        const center = map.getCenter();
+        if (!center) { resolve(''); return; }
+        const token = ++exploreGeocodeToken;
+        exploreGeocoder.geocode({ location: center }, (results, status) => {
+            if (token !== exploreGeocodeToken) { resolve(''); return; }   // a newer refresh superseded this one
+            if (status !== 'OK' || !results || !results.length) { exploreCenterPlace = ''; resolve(''); return; }
+            const label = pickExplorePlaceLabel(results, { coarse });
+            exploreCenterPlace = label;
+            if (label && typeof onResolved === 'function') onResolved(label);
+            resolve(label);
+        });
     });
 }
 
@@ -4265,6 +4366,9 @@ function haversineKm(a, b) {
     return 2 * R * Math.asin(Math.sqrt(s));
 }
 
+// Ceiling on one geocoder round trip in the verification pass below.
+const EXPLORE_VERIFY_TIMEOUT_MS = 6000;
+
 // The model that picks explore discoveries occasionally returns a real place
 // name with coordinates that land somewhere else entirely — e.g. "Slave Lake"
 // pinned in the Nunavut Arctic instead of northern Alberta. Forward-geocode
@@ -4276,12 +4380,22 @@ function haversineKm(a, b) {
 // natural features and historical sites — are left exactly as the model gave
 // them. Resolves to a discovery (possibly with corrected lat/lng) or null.
 function verifyDiscoveryLocation(discovery, b) {
-    return new Promise(resolve => {
+    return new Promise(rawResolve => {
+        // The whole batch waits on these (Promise.all in spawnDiscoveries), so
+        // a geocoder callback that never arrives would hang the fetch — and
+        // with it every future one, since exploreFetchInFlight would stay set.
+        // Verification is only a correction pass: timing out means trusting
+        // the model's own coordinates, which is the same as an unresolvable
+        // name.
+        let settled = false;
+        const resolve = value => { if (!settled) { settled = true; rawResolve(value); } };
+        setTimeout(() => resolve(discovery), EXPLORE_VERIFY_TIMEOUT_MS);
         if (!window.google || !google.maps || !google.maps.Geocoder) { resolve(discovery); return; }
         if (typeof discovery.lat !== 'number' || typeof discovery.lng !== 'number') { resolve(discovery); return; }
         if (!exploreGeocoder) exploreGeocoder = new google.maps.Geocoder();
         const bounds = new google.maps.LatLngBounds({ lat: b.s, lng: b.w }, { lat: b.n, lng: b.e });
         exploreGeocoder.geocode({ address: discovery.name, bounds }, (results, status) => {
+            if (settled) return;
             if (status !== 'OK' || !results || !results.length) { resolve(discovery); return; }
             const top = results[0];
             // A partial or coarse (country/region/county) match says little
@@ -4317,6 +4431,10 @@ function verifyDiscoveryLocation(discovery, b) {
     });
 }
 
+// Backstop for the fit-to-batch camera move below: how long to wait for the
+// map's 'idle' before re-arming the pan/zoom listener regardless.
+const EXPLORE_FIT_REARM_MS = 2500;
+
 // Zooms/pans so every pin in the batch that just spawned is visible at once.
 // Skipped for a single discovery — fitBounds on a near-zero-size bounds tends
 // to over-zoom, and "show all of them" is trivially already true for one pin.
@@ -4333,16 +4451,39 @@ function fitExploreDiscoveries(batch) {
         google.maps.event.removeListener(exploreIdleListener);
         exploreIdleListener = null;
     }
-    map.fitBounds(bounds, 60);
-    google.maps.event.addListenerOnce(map, 'idle', () => {
-        if (!exploreModeActive) return;
+
+    // Re-arming is on a timeout as well as on 'idle', because 'idle' is not
+    // guaranteed: a fitBounds that barely moves the camera (or doesn't move it
+    // at all, when the batch already fits the current view) can settle without
+    // firing one. When that happened, Explore lost its only pan/zoom listener
+    // for the rest of the session — the map kept moving and nothing ever
+    // spawned again. Whichever fires first wins; the other is a no-op.
+    let rearmed = false;
+    const rearm = () => {
+        if (rearmed) return;
+        rearmed = true;
+        if (!exploreModeActive) return;   // exit/enter own the listener in that case
         const b = map.getBounds();
         if (b) {
             const ne = b.getNorthEast(), sw = b.getSouthWest();
             exploreLastBounds = { n: ne.lat(), s: sw.lat(), e: ne.lng(), w: sw.lng() };
         }
-        exploreIdleListener = map.addListener('bounds_changed', scheduleExploreCheck);
-    });
+        attachExploreBoundsListener();
+    };
+    map.fitBounds(bounds, 60);
+    google.maps.event.addListenerOnce(map, 'idle', rearm);
+    setTimeout(rearm, EXPLORE_FIT_REARM_MS);
+}
+
+// Explore listens on 'bounds_changed' for every pan/zoom (see
+// enterExploreMode for why, not 'idle'). Everything that (re)starts listening
+// goes through here so the listener can never be attached twice, and — more
+// importantly — so there's a single definition of "Explore is live again"
+// for fitExploreDiscoveries to restore after it detaches.
+function attachExploreBoundsListener() {
+    if (!map) return;
+    if (exploreIdleListener) google.maps.event.removeListener(exploreIdleListener);
+    exploreIdleListener = map.addListener('bounds_changed', scheduleExploreCheck);
 }
 
 let exploreDebounceTimer = null;
@@ -4454,7 +4595,7 @@ function addExploreMarker(discovery) {
     marker._pinColor = color;
     marker._pinEmoji = EXPLORE_CATEGORY_EMOJI[discovery.category] || '✨';
     marker._pinImageDataUri = null;
-    getDiscoveryImageInfo(discovery).then(({ imageUrl }) => {
+    getDiscoveryLeadImage(discovery).then(imageUrl => {
         if (!imageUrl) return;
         fetchImageAsDataUri(imageUrl).then(dataUri => {
             if (!dataUri) return;
@@ -4468,10 +4609,26 @@ function addExploreMarker(discovery) {
     return marker;
 }
 
-async function spawnDiscoveries(b) {
+// Ceiling on a single /explore-nearby round trip before it's abandoned.
+const EXPLORE_FETCH_TIMEOUT_MS = 30000;
+// How long a batch will wait on the reverse-geocoded place label before
+// giving up on it and asking with coordinates alone.
+const EXPLORE_PLACE_LABEL_WAIT_MS = 2000;
+// Viewport signature of the last batch that arrived and then verified away to
+// nothing, so that viewport gets exactly one automatic second attempt (see
+// spawnDiscoveries) rather than either giving up immediately or looping.
+let exploreEmptyRetryKey = null;
+const exploreBoundsKey = b => [b.n, b.s, b.e, b.w].map(v => v.toFixed(2)).join(',');
+
+async function spawnDiscoveries(b, { isRetry = false } = {}) {
     exploreFetchInFlight = true;
     explorePendingRecheck = false;  // this fetch covers the current viewport; only a move *after* now counts
+    explorePendingRetry = false;
     exploreFirstFetchDone = true;   // relaxed first-fetch zoom floor is spent
+    // The user has panned/zoomed enough to trigger a real discovery batch —
+    // that's genuine engagement, so retire the load-in typewriter for good
+    // (same as opening Curate or running a curated search).
+    stopExploreBarTypewriter();
     // Fold any curation focus into the wording — "Discovering volcanoes near
     // Naples…" rather than a bare "Discovering nearby…".
     const subj = exploreFocus ? `${exploreFocus} ` : '';
@@ -4487,23 +4644,61 @@ async function spawnDiscoveries(b) {
     // Re-geocode the map center for this batch; if it resolves while the
     // fetch is still running, upgrade the bare "Discovering nearby…" to name
     // the place. Cached in exploreCenterPlace for the result-count line too.
-    refreshExploreCenterPlace(label => {
+    const centerPlacePromise = refreshExploreCenterPlace(label => {
         if (exploreFetchInFlight) setExploreBarStatus(`Discovering ${subj}${prep} ${label}…`);
     }, { coarse: wide });
 
     try {
         const center = map.getCenter();
-        const res = await fetch('/explore-nearby', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                lat: center.lat(), lng: center.lng(),
-                north: b.n, south: b.s, east: b.e, west: b.w,
-                exclude: exploreShownNames.slice(-40),
-                focus: exploreFocus || undefined,
-                categories: exploreCurationCategoriesParam() || undefined,
-            }),
-        });
+        // The label goes to the server with the request. Coordinates alone
+        // don't reliably tell the model where it's being asked about — a box
+        // over central Vietnam came back full of Cambodian temples, which the
+        // bounds check then binned as "nothing here" — so naming the region
+        // ("Da Nang, Vietnam") is what keeps the batch on target. Capped short
+        // so a slow or dead geocode delays the batch by no more than a moment;
+        // the server just goes without the label in that case.
+        const centerPlace = await Promise.race([
+            centerPlacePromise.catch(() => ''),
+            new Promise(r => setTimeout(() => r(''), EXPLORE_PLACE_LABEL_WAIT_MS)),
+        ]);
+        // Hard ceiling on the whole request. Without one, a request that never
+        // comes back leaves exploreFetchInFlight stuck true and every later
+        // pan/zoom silently no-ops for the rest of the session (exploreOnIdle
+        // just marks a recheck that nothing will ever run).
+        const abort = new AbortController();
+        const abortTimer = setTimeout(() => abort.abort(), EXPLORE_FETCH_TIMEOUT_MS);
+        let res;
+        try {
+            res = await fetch('/explore-nearby', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                signal: abort.signal,
+                body: JSON.stringify({
+                    lat: center.lat(), lng: center.lng(),
+                    north: b.n, south: b.s, east: b.e, west: b.w,
+                    exclude: exploreShownNames.slice(-40),
+                    place: centerPlace || exploreCenterPlace || undefined,
+                    focus: exploreFocus || undefined,
+                    categories: exploreCurationCategoriesParam() || undefined,
+                }),
+            });
+        } finally {
+            clearTimeout(abortTimer);
+        }
+        // A failed request used to fall straight through here: res.json() gave
+        // {error: ...} with no `discoveries`, which read as an empty batch and
+        // reported "Nothing new found here — try panning further". A rate
+        // limit, a spent token allowance or an upstream model error all looked
+        // to the user like a region with nothing in it, and (because the empty
+        // batch still recorded exploreLastBounds) panning back didn't retry.
+        if (!res.ok) {
+            const body = await res.json().catch(() => ({}));
+            const err = new Error(`explore-nearby ${res.status}`);
+            err.exploreUserMessage = res.status === 429
+                ? (body.error || 'Daily free limit reached — log in for unlimited exploring.')
+                : 'Couldn’t load places here — nudge the map to try again.';
+            throw err;
+        }
         const data = await res.json();
         const rawDiscoveries = Array.isArray(data.discoveries) ? data.discoveries : [];
 
@@ -4539,6 +4734,19 @@ async function spawnDiscoveries(b) {
             }
         }
 
+        // The model named places and the geocoder put every one of them
+        // somewhere else — a bad batch, not an empty patch of the world.
+        // Take one more swing at this viewport (with those names now in the
+        // exclude list, so it can't just repeat them) before reporting that
+        // there's nothing here. Once per viewport: a second failure falls
+        // through to the honest "nothing found" below.
+        const boundsKey = exploreBoundsKey(b);
+        if (!discoveries.length && rawDiscoveries.length && exploreEmptyRetryKey !== boundsKey) {
+            exploreEmptyRetryKey = boundsKey;
+            explorePendingRecheck = true;   // the finally block re-checks; exploreLastBounds stays unset
+            return;
+        }
+
         // A new batch normally means the user has wandered on from whatever
         // the detail panel was showing — close it. But if they still have a
         // location selected, leave its panel open and just drop the new pins
@@ -4551,10 +4759,23 @@ async function spawnDiscoveries(b) {
         // resetExploreDiscoveries() for the explicit "clear everything" action.
         const newBatch = [];
         if (discoveries.length === 0) {
-            setExploreBarStatus(
-                exploreFocus ? `No “${exploreFocus}” places here — try panning, or change your focus`
-                : exploreCurationActive() ? 'Nothing in those categories here — try panning, or add categories'
-                : 'Nothing new found here — try panning further');
+            // An uncurated area coming back empty is almost always Haiku being
+            // streaky, not a genuinely barren map — give it one more shot for
+            // the same viewport before telling the user there's nothing here.
+            // Curated/focused batches legitimately return nothing, so those
+            // report straight away.
+            if (!isRetry && !exploreFocus && !exploreCurationActive()) {
+                explorePendingRetry = true;
+            } else {
+                setExploreBarStatus(
+                    exploreFocus ? `No “${exploreFocus}” places here — try panning, or change your focus`
+                    : exploreCurationActive() ? 'Nothing in those categories here — try panning, or add categories'
+                    : 'Nothing new found here — try panning further');
+                // Only remember this viewport as "covered" once we've settled
+                // on nothing — otherwise a small nudge back should retry rather
+                // than being brushed off by exploreBoundsChangedEnough.
+                exploreLastBounds = b;
+            }
         } else {
             discoveries.forEach(discovery => {
                 addExploreMarker(discovery);
@@ -4570,7 +4791,14 @@ async function spawnDiscoveries(b) {
         exploreLastBounds = b;
     } catch (error) {
         console.error('Error fetching /explore-nearby:', error);
-        if (exploreModeActive) setExploreBarStatus('Couldn’t reach the server — try panning again');
+        // exploreLastBounds is deliberately left alone on this path, so the
+        // same viewport counts as "changed enough" to fetch again on the next
+        // nudge instead of being remembered as already covered.
+        if (exploreModeActive) {
+            setExploreBarStatus(error && error.name === 'AbortError'
+                ? 'That took too long — nudge the map to try again'
+                : (error && error.exploreUserMessage) || 'Couldn’t reach the server — try panning again');
+        }
     } finally {
         exploreFetchInFlight = false;
         document.getElementById('exploreBar')?.classList.remove('loading');
@@ -4660,6 +4888,19 @@ function openExploreDetail(discovery) {
         if (articleUrl) {
             fetchExtraImages(articleUrl, imageUrl).then(items => {
                 if (requestId !== exploreDetailRequestId) return;
+                // No lead thumbnail on the article, but it has pictures in its
+                // body — promote the first into the main slot rather than
+                // leaving the whole image panel hidden (which read as "this
+                // place has no photos"). The rest still fill the strip below.
+                if (!imageUrl && items.length) {
+                    const lead = items.shift();
+                    img.src = extraImageUrl(lead);
+                    img.style.display = '';
+                    img.dataset.caption = extraImageCaption(lead) || '';
+                    placeholder.style.display = 'none';
+                    if (!imgDesc.textContent) imgDesc.textContent = extraImageCaption(lead);
+                    document.getElementById('edpImagePanel')?.classList.add('visible');
+                }
                 const grid = document.getElementById('edpExtraImages');
                 grid.innerHTML = '';
                 items.forEach(it => {
@@ -4775,8 +5016,19 @@ function getExploreRelated(discovery) {
             focus: exploreFocus || undefined,
             categories: exploreCurationCategoriesParam() || undefined,
         }),
-    }).then(r => r.json()).then(data => Array.isArray(data.related) ? data.related : [])
-      .catch(() => []);
+    }).then(r => (r.ok ? r.json() : Promise.reject(new Error(`explore-related ${r.status}`))))
+      .then(data => (Array.isArray(data.related) ? data.related : []))
+      .catch(err => {
+          console.error('Error fetching /explore-related:', err);
+          return [];
+      })
+      .then(related => {
+          // Only a real, non-empty answer is worth remembering — caching a
+          // failure would leave "Where to next" permanently blank for this
+          // place, with no way to retry short of a reload.
+          if (!related.length) delete exploreRelatedCache[discovery.name];
+          return related;
+      });
     exploreRelatedCache[discovery.name] = promise;
     return promise;
 }
@@ -5140,7 +5392,7 @@ function showExplorePopout(discovery, screenPos) {
         imgDescEl.textContent = '';
     }
 
-    getDiscoveryImageInfo(discovery).then(({ imageUrl }) => {
+    getDiscoveryLeadImage(discovery).then(imageUrl => {
         if (activeExploreDiscovery !== discovery) return;
         if (!imageUrl) return;
         img.src = imageUrl;

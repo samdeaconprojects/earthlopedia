@@ -725,6 +725,30 @@ app.post('/followup-quick-answer', aiGate, async (req, res) => {
     }
 });
 
+// Pulls the first complete JSON array out of a model reply. The obvious
+// first-'[' to last-']' slice breaks whenever anything follows the array — a
+// closing remark, a second array, a stray bracket in prose — and the parse
+// error then surfaces to the user as an empty map. Walking the brackets (and
+// skipping over string contents) ends at the array's real closing bracket.
+function extractJsonArray(raw) {
+    const start = raw.indexOf('[');
+    if (start === -1) throw new Error('No JSON array in response');
+    let depth = 0, inString = false, escaped = false;
+    for (let i = start; i < raw.length; i++) {
+        const ch = raw[i];
+        if (inString) {
+            if (escaped) escaped = false;
+            else if (ch === '\\') escaped = true;
+            else if (ch === '"') inString = false;
+            continue;
+        }
+        if (ch === '"') inString = true;
+        else if (ch === '[') depth++;
+        else if (ch === ']' && --depth === 0) return JSON.parse(raw.slice(start, i + 1));
+    }
+    throw new Error('Unterminated JSON array in response');
+}
+
 const EXPLORE_CATEGORIES = ['history', 'nature', 'culture', 'oddity'];
 
 // Turns the Explore "Curate" panel's free-text focus + category subset into
@@ -762,7 +786,7 @@ function buildExploreCuration(focus, categories) {
 
 app.post('/explore-nearby', aiGate, async (req, res) => {
     try {
-        const { lat, lng, north, south, east, west, exclude, focus, categories } = req.body || {};
+        const { lat, lng, north, south, east, west, exclude, focus, categories, place } = req.body || {};
         if ([lat, lng, north, south, east, west].some(n => typeof n !== 'number' || Number.isNaN(n))) {
             return res.status(400).json({ error: 'Missing or invalid bounds', discoveries: [] });
         }
@@ -790,33 +814,20 @@ app.post('/explore-nearby', aiGate, async (req, res) => {
         const areaLine = wideView
             ? `That visible area is large — roughly ${Math.round(latSpanKm)} km north–south by ${Math.round(lngSpanKm)} km east–west, so it covers a whole region rather than a single locality.`
             : `That visible area spans roughly ${Math.round(latSpanKm)} km north–south by ${Math.round(lngSpanKm)} km east–west, centred near ${lat}, ${lng}.`;
+        // The client already reverse-geocodes the map centre for its status
+        // line ("Discovering near Da Nang, Vietnam…") and sends that label
+        // along. Coordinates alone are not enough for the model to know where
+        // it is being asked about: given a box over central Vietnam it will
+        // confidently answer with Angkor Wat and Phnom Penh, several hundred
+        // km away, and the bounds filter below then throws the whole batch
+        // out as "nothing here". Naming the region in words anchors it.
+        const cleanPlace = typeof place === 'string' ? place.trim().slice(0, 80) : '';
+        const placeLine = cleanPlace
+            ? ` In everyday terms, that area is ${cleanPlace} — every place you name has to genuinely be there, not in a neighbouring country or region.`
+            : '';
         const spreadLine = wideView
             ? `\n\nBecause this is a wide, zoomed-out view, do NOT cluster your picks near the centre point (${lat}, ${lng}). Choose the most remarkable places from ACROSS the entire visible area — different cities, provinces, and edges of the box — so the results represent the whole region on screen, not just its middle. If the single best example of what's wanted sits near an edge of the box, that's the one to return.`
             : '';
-
-        const response = await anthropic.messages.create({
-            model: 'claude-haiku-4-5-20251001',
-            max_tokens: 900,
-            temperature: 1,
-            messages: [{
-                role: 'user',
-                content: `You are picking real points of interest for someone casually wandering an interactive map with no destination in mind. They're currently looking at the map area bounded by latitude ${south} to ${north} and longitude ${west} to ${east}. ${areaLine}${spreadLine}
-
-Name up to ${maxPlaces} real, specific, verifiable places inside (or very close to) that visible area ${varietyClause}. Only include places you're confident are real and can place accurately; skip a place entirely rather than guess at its coordinates. If you can't confidently find ${maxPlaces}, give fewer.${excludeBlock}${focusBlock}
-
-For each place give: its exact name, precise latitude/longitude (must fall within the given bounds), and a one-sentence hook (12–22 words, plain declarative statement of the single most interesting fact — never use the "X isn't just Y — it Z" contrast construction or variants like "not just blank, its blank"). ${categoryLine}
-
-Reply with ONLY a JSON array, nothing else — no preamble, no markdown fences:
-[{"name": "...", "lat": 0.0, "lng": 0.0, "teaser": "...", "category": "history"${focusMatchField}}]`
-            }],
-        });
-        recordUsage('explore-nearby', req.authed, response.usage);
-
-        const raw = response.content[0].text.trim();
-        const start = raw.indexOf('[');
-        const end = raw.lastIndexOf(']');
-        if (start === -1 || end === -1) throw new Error('No JSON array in response');
-        const parsed = JSON.parse(raw.slice(start, end + 1));
 
         const CATEGORIES = new Set(['history', 'nature', 'culture', 'oddity']);
         // Small, fixed-range tolerance for "very close to" the requested
@@ -831,21 +842,96 @@ Reply with ONLY a JSON array, nothing else — no preamble, no markdown fences:
         // sane at every zoom level.
         const latMargin = Math.min(Math.max((north - south) * 0.15, 0.02), 0.15);
         const lngMargin = Math.min(Math.max((east - west) * 0.15, 0.02), 0.15);
-        const discoveries = parsed.filter(d =>
-            d && typeof d.name === 'string' && d.name.trim() &&
-            typeof d.lat === 'number' && typeof d.lng === 'number' &&
-            d.lat >= south - latMargin && d.lat <= north + latMargin &&
-            d.lng >= west - lngMargin && d.lng <= east + lngMargin &&
-            // Focus mode asks for a self-assessed "match" flag — drop anything
-            // the model itself wasn't willing to vouch for.
-            (!cleanFocus || d.match === true)
-        ).map(d => ({
-            name: d.name.trim(),
-            lat: d.lat,
-            lng: d.lng,
-            teaser: typeof d.teaser === 'string' ? d.teaser.trim() : '',
-            category: CATEGORIES.has(d.category) ? d.category : 'oddity',
-        })).filter(d => !allowedCats || allowedCats.includes(d.category));
+
+        // One round trip: ask, parse, and check every pick against the box and
+        // the user's curation. `correction` is empty on the first go and
+        // carries the previous round's rejects on the retry below.
+        async function attemptDiscoveries(correction) {
+            const response = await anthropic.messages.create({
+                model: 'claude-haiku-4-5-20251001',
+                max_tokens: 900,
+                temperature: 1,
+                messages: [{
+                    role: 'user',
+                    content: `You are picking real points of interest for someone casually wandering an interactive map with no destination in mind. They're currently looking at the map area bounded by latitude ${south} to ${north} and longitude ${west} to ${east}. ${areaLine}${placeLine}${spreadLine}
+
+Name up to ${maxPlaces} real, specific, verifiable places inside (or very close to) that visible area ${varietyClause}. Only include places you're confident are real and can place accurately; skip a place entirely rather than guess at its coordinates. If you can't confidently find ${maxPlaces}, give fewer.${excludeBlock}${focusBlock}${correction}
+
+For each place give: its exact name, precise latitude/longitude (must fall within the given bounds), and a one-sentence hook (12–22 words, plain declarative statement of the single most interesting fact — never use the "X isn't just Y — it Z" contrast construction or variants like "not just blank, its blank"). ${categoryLine}
+
+Check each place's own coordinates against the bounds above before you include it, and drop any that fall outside them.
+
+Reply with ONLY a JSON array, nothing else — no preamble, no markdown fences:
+[{"name": "...", "lat": 0.0, "lng": 0.0, "teaser": "...", "category": "history"${focusMatchField}}]`
+                }],
+            });
+            recordUsage('explore-nearby', req.authed, response.usage);
+
+            const parsed = extractJsonArray(response.content[0].text.trim());
+
+            const discoveries = [];
+            const dropped = [];
+            const rejectedNames = [];
+            checkEach(parsed, discoveries, dropped, rejectedNames);
+            return { parsed, discoveries, dropped, rejectedNames };
+        }
+
+        // Same checks as before, written out so a batch that arrives and then
+        // vanishes can be explained in the log — and so the rejected names can
+        // be handed back to the model on the retry — rather than silently
+        // reaching the user as "nothing here".
+        function checkEach(parsed, discoveries, dropped, rejectedNames) {
+            for (const d of parsed) {
+                if (!d || typeof d.name !== 'string' || !d.name.trim() ||
+                    typeof d.lat !== 'number' || typeof d.lng !== 'number') {
+                    dropped.push('(malformed entry)');
+                    continue;
+                }
+                const name = d.name.trim();
+                if (d.lat < south - latMargin || d.lat > north + latMargin ||
+                    d.lng < west - lngMargin || d.lng > east + lngMargin) {
+                    dropped.push(`${name}: outside the viewport`);
+                    rejectedNames.push(name);
+                    continue;
+                }
+                // Focus mode asks for a self-assessed "match" flag — drop anything
+                // the model itself wasn't willing to vouch for.
+                if (cleanFocus && d.match !== true) {
+                    dropped.push(`${name}: not a "${cleanFocus}" match`);
+                    rejectedNames.push(name);
+                    continue;
+                }
+                const category = CATEGORIES.has(d.category) ? d.category : 'oddity';
+                if (allowedCats && !allowedCats.includes(category)) {
+                    dropped.push(`${name}: ${category} not in the chosen categories`);
+                    rejectedNames.push(name);
+                    continue;
+                }
+                discoveries.push({
+                    name,
+                    lat: d.lat,
+                    lng: d.lng,
+                    teaser: typeof d.teaser === 'string' ? d.teaser.trim() : '',
+                    category,
+                });
+            }
+        }
+
+        let { parsed, discoveries, dropped, rejectedNames } = await attemptDiscoveries('');
+        // Everything the model offered was thrown out — usually because it
+        // answered about the wrong region entirely. That reads to the user as
+        // an empty patch of the world, which is almost never true, so spend
+        // one more call telling it exactly what was rejected and why.
+        if (!discoveries.length && rejectedNames.length) {
+            console.log(`[explore-nearby] retrying — all ${parsed.length} rejected: ${dropped.join(' | ')}`);
+            const retry = await attemptDiscoveries(
+                `\n\nAn earlier attempt at this same area answered with ${rejectedNames.map(n => `"${n}"`).join(', ')} — every one was rejected for not being inside the bounds above${cleanPlace ? ` (they were not in ${cleanPlace})` : ''}. Do not name any of them again. Name places that genuinely sit between latitude ${south} and ${north} and longitude ${west} and ${east}.`
+            );
+            if (retry.discoveries.length) ({ parsed, discoveries, dropped } = retry);
+        }
+        if (dropped.length) {
+            console.log(`[explore-nearby] model gave ${parsed.length}, kept ${discoveries.length} — dropped ${dropped.join(' | ')}`);
+        }
 
         res.json({ discoveries });
     } catch (error) {
@@ -894,11 +980,7 @@ Reply with ONLY a JSON array, nothing else — no preamble, no markdown fences:
         });
         recordUsage('explore-related', req.authed, response.usage);
 
-        const raw = response.content[0].text.trim();
-        const start = raw.indexOf('[');
-        const end = raw.lastIndexOf(']');
-        if (start === -1 || end === -1) throw new Error('No JSON array in response');
-        const parsed = JSON.parse(raw.slice(start, end + 1));
+        const parsed = extractJsonArray(response.content[0].text.trim());
 
         const CATEGORIES = new Set(['history', 'nature', 'culture', 'oddity']);
         const related = parsed.filter(d =>
@@ -1148,7 +1230,7 @@ if (process.env.NODE_ENV !== 'production') {
                 temperature: 1,
                 messages: [{
                     role: 'user',
-                    content: `You are writing example prompts for a history/geography exploration app called Earthlopedia. Each prompt is a short, punchy, specific question or command about a real historical journey, empire, battle, migration, place, or geographic phenomenon — written to make someone curious enough to click it. Examples of the house style:\n- "Trace every stop on Marco Polo's 24-year journey from Venice to Beijing"\n- "Map exactly where the Black Death spread year by year from 1347 to 1353"\n- "Why does Africa have so many suspiciously straight borders?"\n- "How Polynesian sailors navigated by stars and waves to find every Pacific island"\n\nWrite ${n} new prompts matching that style, all specifically about: "${description}"${avoidBlock}\n\nReply with ONLY a JSON array of ${n} strings, nothing else — no preamble, no markdown fences.`
+                    content: `You are writing example prompts for a history/geography exploration app called Earthlopedia. Each prompt is a short, punchy, specific question or command about a real historical journey, empire, battle, migration, place, or geographic phenomenon — written to make someone curious enough to click it. Examples of the house style:\n- "Trace every stop on Marco Polo's 24-year journey from Venice to Beijing"\n- "Map where the Black Death spread year by year from 1347 to 1353"\n- "Why does Africa have so many suspiciously straight borders?"\n- "How Polynesian sailors navigated by stars and waves to find every Pacific island"\n\nWrite ${n} new prompts matching that style, all specifically about: "${description}"${avoidBlock}\n\nReply with ONLY a JSON array of ${n} strings, nothing else — no preamble, no markdown fences.`
                 }],
             });
 
