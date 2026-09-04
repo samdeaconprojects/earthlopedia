@@ -94,7 +94,6 @@ const FAVORITE_QUESTIONS = [
     "Map every battle that Napoleon lost",
     "Journey along the ring of fire",
     "Trace all seven of Zheng He's treasure voyages across the Indian Ocean",
-    "Map all five D-Day beach landings — Utah, Omaha, Gold, Juno, and Sword",
     "Show Hawaii's trail of former islands",
 ];
 
