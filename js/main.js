@@ -1176,12 +1176,17 @@ const mediumTheme = [
     {
         featureType: "landscape.natural",
         elementType: "geometry",
-        stylers: [{ lightness: -6 }, { saturation: 14 }],
+        stylers: [{ hue: "#2f8a5a" }, { saturation: 30 }, { lightness: -24 }],
     },
     {
         featureType: "landscape.natural.landcover",
         elementType: "geometry",
-        stylers: [{ lightness: -4 }, { saturation: 18 }],
+        stylers: [{ hue: "#2f8a5a" }, { saturation: 36 }, { lightness: -22 }],
+    },
+    {
+        featureType: "landscape.natural.terrain",
+        elementType: "geometry",
+        stylers: [{ hue: "#2f8a5a" }, { saturation: 30 }, { lightness: -24 }],
     },
     {
         featureType: "landscape.man_made",
@@ -1251,7 +1256,7 @@ const mediumTheme = [
     {
         featureType: "water",
         elementType: "geometry",
-        stylers: [{ color: "#0e3d49" }],
+        stylers: [{ color: "#1a6491" }],
     },
     {
         featureType: "water",
@@ -1261,7 +1266,7 @@ const mediumTheme = [
     {
         featureType: "water",
         elementType: "labels.text.stroke",
-        stylers: [{ color: "#0e3d49" }],
+        stylers: [{ color: "#1a6491" }],
     },
 ];
 
@@ -3424,6 +3429,10 @@ let exploreDiscoveries = [];       // current batch, index-aligned with exploreM
 let exploreShownNames = [];        // capped history, sent to the server as `exclude`
 let exploreIdleListener = null;
 let exploreFetchInFlight = false;
+let exploreAbortController = null; // the in-flight /explore-nearby fetch's AbortController, so the
+                                   // "Stop" button (stopExploreSearch) can cancel a running batch
+let exploreSearchStopped = false; // set by stopExploreSearch so spawnDiscoveries' AbortError branch
+                                   // reports "Search stopped" and doesn't auto-retry the viewport
 let explorePendingRecheck = false; // set when the map moved during an in-flight fetch; the fetch's
                                    // finally reschedules a check so the new viewport gets its own batch
 let explorePendingRetry = false;   // set when an uncurated batch came back empty; the fetch's finally
@@ -3585,7 +3594,19 @@ function formatLocationMeta(location) {
         ? (location.year < 0 ? `${Math.abs(location.year)} BCE` : String(location.year))
         : null;
     const coords = `${Math.abs(location.lat).toFixed(2)}°${location.lat >= 0 ? 'N' : 'S'}, ${Math.abs(location.lng).toFixed(2)}°${location.lng >= 0 ? 'E' : 'W'}`;
-    return { place, desc, yearDisplay, coords };
+
+    // Country (or, for a location that spans several, its list of countries)
+    // shown under the place name so the header always says where on Earth
+    // this is — skipped only when the name already spells the country out.
+    const countries = location.country
+        ? [location.country]
+        : (Array.isArray(location.region_countries) ? location.region_countries : []);
+    const inName = s => place.toLowerCase().includes(String(s).toLowerCase());
+    const context = countries.filter(Boolean).some(inName)
+        ? ''
+        : countries.filter(Boolean).join(' · ');
+
+    return { place, desc, yearDisplay, coords, context };
 }
 
 // Drives the panel header (location name/date/event in place of the topic
@@ -3619,12 +3640,14 @@ function renderHeaderState() {
     }
 
     if (loc) {
-        const { place, desc, yearDisplay, coords } = formatLocationMeta(loc);
+        const { place, desc, yearDisplay, coords, context } = formatLocationMeta(loc);
         const locHeaderTitle = document.getElementById('locHeaderTitle');
+        const locHeaderContext = document.getElementById('locHeaderContext');
         const locHeaderYear = document.getElementById('locHeaderYear');
         const locHeaderCoords = document.getElementById('locHeaderCoords');
         const locHeaderEvent = document.getElementById('locHeaderEvent');
         if (locHeaderTitle) locHeaderTitle.textContent = place;
+        if (locHeaderContext) locHeaderContext.textContent = context || '';
         if (locHeaderYear) locHeaderYear.textContent = yearDisplay || '';
         if (locHeaderCoords) locHeaderCoords.textContent = coords;
         if (locHeaderEvent) locHeaderEvent.textContent = desc;
@@ -4132,8 +4155,10 @@ function exitExploreMode({ skipMarkerRestore = false, preserveDiscoveries = fals
         exploreIdleListener = null;
     }
     if (exploreDebounceTimer) { clearTimeout(exploreDebounceTimer); exploreDebounceTimer = null; }
+    if (exploreAbortController) { try { exploreAbortController.abort(); } catch (e) {} exploreAbortController = null; }
     exploreFetchInFlight = false;
     document.getElementById('exploreBar')?.classList.remove('loading', 'bar-status-visible');
+    updateExploreStopBtn();
     // exploreSearchInstead() passes preserveDiscoveries so the discovered
     // batch is just hidden, not thrown away — resumeExploreMode() re-shows
     // the same markers instead of the map coming back empty.
@@ -4334,6 +4359,22 @@ function pickExplorePlaceLabel(results, { coarse = false } = {}) {
     return context ? `${primary}, ${context}` : primary;
 }
 
+// Reverse-geocodes a point to just its country name, for the Explore detail
+// header (discoveries don't carry a country field of their own). Resolves to
+// '' when geocoding is unavailable or turns up nothing.
+function reverseGeocodeCountry(lat, lng) {
+    return new Promise(resolve => {
+        if (!window.google || !google.maps || !google.maps.Geocoder) { resolve(''); return; }
+        if (typeof lat !== 'number' || typeof lng !== 'number') { resolve(''); return; }
+        if (!exploreGeocoder) exploreGeocoder = new google.maps.Geocoder();
+        exploreGeocoder.geocode({ location: { lat, lng } }, (results, status) => {
+            if (status !== 'OK' || !results || !results.length) { resolve(''); return; }
+            const comps = results.flatMap(r => r.address_components || []);
+            resolve(comps.find(c => c.types.includes('country'))?.long_name || '');
+        });
+    });
+}
+
 // Resolves to the label ('' when geocoding is unavailable or finds nothing).
 // spawnDiscoveries awaits it so the label can go to the server with the batch
 // request, not just into the status line.
@@ -4389,6 +4430,12 @@ function verifyDiscoveryLocation(discovery, b) {
         // name.
         let settled = false;
         const resolve = value => { if (!settled) { settled = true; rawResolve(value); } };
+        // A grounded discovery's coordinates came out of a geographic database
+        // rather than the model, so there is nothing here to correct. Skipping
+        // saves a billable geocode per pin, and avoids the one way this pass
+        // can do harm: a name that also belongs to somewhere far away geocodes
+        // to the wrong one and snaps an already-correct pin onto it.
+        if (discovery && discovery.grounded) { resolve(discovery); return; }
         setTimeout(() => resolve(discovery), EXPLORE_VERIFY_TIMEOUT_MS);
         if (!window.google || !google.maps || !google.maps.Geocoder) { resolve(discovery); return; }
         if (typeof discovery.lat !== 'number' || typeof discovery.lng !== 'number') { resolve(discovery); return; }
@@ -4489,8 +4536,68 @@ function attachExploreBoundsListener() {
 let exploreDebounceTimer = null;
 function scheduleExploreCheck(immediate = false) {
     if (exploreDebounceTimer) { clearTimeout(exploreDebounceTimer); exploreDebounceTimer = null; }
-    if (immediate) { exploreOnIdle(); return; }
-    exploreDebounceTimer = setTimeout(() => { exploreDebounceTimer = null; exploreOnIdle(); }, 700);
+    if (immediate) { exploreOnIdle(); updateExploreStopBtn(); return; }
+    exploreDebounceTimer = setTimeout(() => {
+        exploreDebounceTimer = null;
+        exploreOnIdle();
+        updateExploreStopBtn();
+    }, 700);
+    updateExploreStopBtn();
+}
+
+// The two in-bar controls are mutually exclusive: "Research area" shows at
+// rest, and "Stop" takes its place while a discovery batch is actually running
+// or queued — see #exploreResearchBtn / #exploreStopBtn in index.html. Called
+// from every spot that flips exploreFetchInFlight or the debounce timer.
+function updateExploreStopBtn() {
+    const busy = exploreModeActive && (exploreFetchInFlight || !!exploreDebounceTimer);
+    const stopBtn = document.getElementById('exploreStopBtn');
+    const researchBtn = document.getElementById('exploreResearchBtn');
+    if (stopBtn) stopBtn.style.display = busy ? '' : 'none';
+    if (researchBtn) researchBtn.style.display = busy ? 'none' : '';
+}
+
+// "Research this area" — force a discovery batch for the current map view on
+// demand, rather than waiting for a big enough pan/zoom to trigger one. Bypasses
+// the exploreBoundsChangedEnough gate (so re-researching the same view works)
+// and uses the relaxed zoom floor.
+function researchExploreArea() {
+    if (!exploreModeActive || exploreFetchInFlight) return;
+    const bounds = map.getBounds();
+    if (!bounds) return;
+    if (map.getZoom() < EXPLORE_FIRST_FETCH_MIN_ZOOM) {
+        setExploreBarStatus('Zoom in a little, then research this area', { idle: true });
+        return;
+    }
+    if (exploreDebounceTimer) { clearTimeout(exploreDebounceTimer); exploreDebounceTimer = null; }
+    exploreSearchStopped = false;
+    exploreSuppressAutoFetchUntil = 0;
+    exploreEmptyRetryKey = null;
+    const ne = bounds.getNorthEast(), sw = bounds.getSouthWest();
+    spawnDiscoveries({ n: ne.lat(), s: sw.lat(), e: ne.lng(), w: sw.lng() });
+    updateExploreStopBtn();
+}
+
+// "Stop" — abort an in-flight discovery batch and cancel any queued one. The
+// current viewport is recorded as "covered" so the auto "wander nearby" fetch
+// doesn't immediately restart it; moving the map still triggers a fresh batch.
+function stopExploreSearch() {
+    if (exploreDebounceTimer) { clearTimeout(exploreDebounceTimer); exploreDebounceTimer = null; }
+    explorePendingRecheck = false;
+    explorePendingRetry = false;
+    exploreSearchStopped = true;
+    const wasFetching = exploreFetchInFlight;
+    if (exploreAbortController) { try { exploreAbortController.abort(); } catch (e) {} }
+    const bounds = map.getBounds();
+    if (bounds) {
+        const ne = bounds.getNorthEast(), sw = bounds.getSouthWest();
+        exploreLastBounds = { n: ne.lat(), s: sw.lat(), e: ne.lng(), w: sw.lng() };
+    }
+    if (wasFetching) {
+        document.getElementById('exploreBar')?.classList.remove('loading');
+        setExploreBarStatus('Search stopped — move the map to look somewhere else', { idle: true });
+    }
+    updateExploreStopBtn();
 }
 
 // Whether the map has moved/zoomed enough since the last fetch to justify a
@@ -4622,6 +4729,8 @@ const exploreBoundsKey = b => [b.n, b.s, b.e, b.w].map(v => v.toFixed(2)).join('
 
 async function spawnDiscoveries(b, { isRetry = false } = {}) {
     exploreFetchInFlight = true;
+    exploreSearchStopped = false;
+    updateExploreStopBtn();
     explorePendingRecheck = false;  // this fetch covers the current viewport; only a move *after* now counts
     explorePendingRetry = false;
     exploreFirstFetchDone = true;   // relaxed first-fetch zoom floor is spent
@@ -4666,6 +4775,7 @@ async function spawnDiscoveries(b, { isRetry = false } = {}) {
         // pan/zoom silently no-ops for the rest of the session (exploreOnIdle
         // just marks a recheck that nothing will ever run).
         const abort = new AbortController();
+        exploreAbortController = abort;  // so stopExploreSearch() can cancel this fetch
         const abortTimer = setTimeout(() => abort.abort(), EXPLORE_FETCH_TIMEOUT_MS);
         let res;
         try {
@@ -4794,18 +4904,24 @@ async function spawnDiscoveries(b, { isRetry = false } = {}) {
         // exploreLastBounds is deliberately left alone on this path, so the
         // same viewport counts as "changed enough" to fetch again on the next
         // nudge instead of being remembered as already covered.
-        if (exploreModeActive) {
+        if (exploreModeActive && error && error.name === 'AbortError' && exploreSearchStopped) {
+            // User hit "Stop" — stopExploreSearch already set the status line
+            // and marked this viewport covered; don't overwrite either.
+        } else if (exploreModeActive) {
             setExploreBarStatus(error && error.name === 'AbortError'
                 ? 'That took too long — nudge the map to try again'
                 : (error && error.exploreUserMessage) || 'Couldn’t reach the server — try panning again');
         }
     } finally {
         exploreFetchInFlight = false;
+        exploreAbortController = null;
         document.getElementById('exploreBar')?.classList.remove('loading');
+        updateExploreStopBtn();
         // The map moved while this fetch ran (or its results were stale on
         // arrival) — check the current viewport now that we're free to fetch
-        // again. Debounced, so an actively-panning user settles first.
-        if (explorePendingRecheck && exploreModeActive) {
+        // again. Debounced, so an actively-panning user settles first. Skipped
+        // when the user explicitly stopped the search.
+        if (explorePendingRecheck && exploreModeActive && !exploreSearchStopped) {
             explorePendingRecheck = false;
             scheduleExploreCheck();
         }
@@ -4851,6 +4967,24 @@ function openExploreDetail(discovery) {
     document.getElementById('edpCategory').textContent = EXPLORE_CATEGORY_LABEL[discovery.category] || '';
     document.getElementById('edpTitle').textContent = discovery.name;
     document.getElementById('edpCoords').textContent = formatLocationMeta(discovery).coords;
+
+    // Country line under the title — always say which country this place is
+    // in. Discoveries have no country of their own, so reverse-geocode the
+    // pin (cached per discovery), and drop it if a newer panel opened first
+    // or the name already spells the country out.
+    const edpContext = document.getElementById('edpContext');
+    if (edpContext) {
+        edpContext.textContent = discovery._country || '';
+        if (discovery._country === undefined) {
+            reverseGeocodeCountry(discovery.lat, discovery.lng).then(country => {
+                discovery._country = country || '';
+                if (requestId !== exploreDetailRequestId) return;
+                const spelledOut = country && discovery.name
+                    && discovery.name.toLowerCase().includes(country.toLowerCase());
+                edpContext.textContent = spelledOut ? '' : (country || '');
+            });
+        }
+    }
     // Show the teaser straight away, with a loading row beneath it so it's
     // clear a fuller write-up is still on its way (the /location-summary fetch
     // below replaces this whole block once it lands).

@@ -3,6 +3,7 @@ const path = require('path');
 const crypto = require('crypto');
 const fs = require('fs');
 const Anthropic = require('@anthropic-ai/sdk');
+const { findCandidates } = require('./geo');
 const app = express();
 require('dotenv').config();
 
@@ -843,6 +844,88 @@ app.post('/explore-nearby', aiGate, async (req, res) => {
         const latMargin = Math.min(Math.max((north - south) * 0.15, 0.02), 0.15);
         const lngMargin = Math.min(Math.max((east - west) * 0.15, 0.02), 0.15);
 
+        // ---- Grounded path -------------------------------------------------
+        // Wikidata knows what is really inside this box and exactly where it
+        // sits, so the model is never asked to recall or invent a coordinate:
+        // it picks from a numbered list and writes the hook, and the server
+        // copies the lat/lng straight off the candidate record. This is what
+        // removed the "confidently answers about the wrong country" failure
+        // that the bounds filter below was built to catch.
+        async function attemptGrounded(candidates) {
+            const list = candidates
+                .map((c, i) => `${i}. ${c.name}${c.type ? ` (${c.type})` : ''} — ${c.lat.toFixed(2)}, ${c.lng.toFixed(2)}`)
+                .join('\n');
+
+            const response = await anthropic.messages.create({
+                model: 'claude-haiku-4-5-20251001',
+                max_tokens: 900,
+                temperature: 0.7,
+                output_config: {
+                    format: {
+                        type: 'json_schema',
+                        schema: {
+                            type: 'object',
+                            properties: {
+                                picks: {
+                                    type: 'array',
+                                    items: {
+                                        type: 'object',
+                                        properties: {
+                                            id: { type: 'integer' },
+                                            teaser: { type: 'string' },
+                                            category: { type: 'string', enum: EXPLORE_CATEGORIES },
+                                            ...(cleanFocus ? { match: { type: 'boolean' } } : {}),
+                                        },
+                                        required: ['id', 'teaser', 'category', ...(cleanFocus ? ['match'] : [])],
+                                        additionalProperties: false,
+                                    },
+                                },
+                            },
+                            required: ['picks'],
+                            additionalProperties: false,
+                        },
+                    },
+                },
+                messages: [{
+                    role: 'user',
+                    content: `Someone is casually wandering an interactive map with no destination in mind, currently looking at ${cleanPlace || `the area around ${lat}, ${lng}`}. ${areaLine}
+
+Below is a list of real places that genuinely sit inside that area, taken from a geographic database. Every one is real and correctly located.
+
+${list}
+
+Choose up to ${maxPlaces} of them ${varietyClause}. Pick by how genuinely interesting a place is to a curious stranger — favour the surprising, the historic, and the distinctive over the merely large or administrative. Skip anything that is not a real visitable place: administrative districts, wards, provinces, abstract topics like "Geography of X", airports, and generic infrastructure are not interesting destinations. Choose fewer than ${maxPlaces} rather than padding the list with dull entries.${spreadLine}${excludeBlock}${focusBlock}
+
+For each place you pick, return its "id" (the number from the list above), a one-sentence "teaser" (12–22 words, plain declarative statement of the single most interesting fact — never use the "X isn't just Y — it Z" contrast construction or variants like "not just blank, its blank"), and a "category" of exactly one of "history", "nature", "culture", "oddity". ${allowedCats ? `Only pick places you can honestly place in one of: ${allowedCats.join(', ')}.` : ''}`
+                }],
+            });
+            recordUsage('explore-nearby', req.authed, response.usage);
+
+            const picks = JSON.parse(response.content[0].text).picks || [];
+            const discoveries = [];
+            const seen = new Set();
+            for (const p of picks) {
+                const c = candidates[p.id];
+                if (!c || seen.has(p.id)) continue;
+                if (cleanFocus && p.match !== true) continue;
+                const category = CATEGORIES.has(p.category) ? p.category : 'oddity';
+                if (allowedCats && !allowedCats.includes(category)) continue;
+                seen.add(p.id);
+                discoveries.push({
+                    name: c.name,
+                    lat: c.lat,          // straight from Wikidata, never generated
+                    lng: c.lng,
+                    teaser: typeof p.teaser === 'string' ? p.teaser.trim() : '',
+                    category,
+                    // Tells the client not to spend a Google geocode
+                    // second-guessing this coordinate — see
+                    // verifyDiscoveryLocation in js/main.js.
+                    grounded: true,
+                });
+            }
+            return discoveries;
+        }
+
         // One round trip: ask, parse, and check every pick against the box and
         // the user's curation. `correction` is empty on the first go and
         // carries the previous round's rejects on the retry below.
@@ -915,6 +998,25 @@ Reply with ONLY a JSON array, nothing else — no preamble, no markdown fences:
                     category,
                 });
             }
+        }
+
+        // Prefer the grounded path whenever the geographic sources can offer a
+        // real candidate pool for this viewport. They return nothing for a
+        // wide, not-yet-cached box (too slow to hold the request open) and
+        // when the query service is unreachable — in which case we fall
+        // through to the original model-recall path below, guardrails and all.
+        const excludeSet = new Set(excludeList.map(n => n.toLowerCase()));
+        const candidates = (await findCandidates({
+            south, west, north, east, lat, lng, longSideKm,
+        })).filter(c => !excludeSet.has(c.name.toLowerCase()));
+
+        if (candidates.length >= 8) {
+            const grounded = await attemptGrounded(candidates);
+            if (grounded.length) {
+                console.log(`[explore-nearby] grounded — ${grounded.length} of ${candidates.length} candidates`);
+                return res.json({ discoveries: grounded });
+            }
+            console.log(`[explore-nearby] grounded pass returned nothing — falling back to recall`);
         }
 
         let { parsed, discoveries, dropped, rejectedNames } = await attemptDiscoveries('');

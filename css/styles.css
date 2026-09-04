@@ -907,6 +907,78 @@ body.explore-mode #exploreBar { display: flex; }
 }
 #exploreBar:hover .explore-bar-search-icon { color: rgba(255,255,255,0.75); }
 
+/* Compact manual-discovery controls that live inside the bar (see
+   #exploreResearchBtn / #exploreStopBtn in index.html). Quiet ghost chips so
+   they read as secondary to the bar itself; only one is ever shown at a time —
+   "Research area" at rest, "Stop" while a batch loads (updateExploreStopBtn). */
+.explore-bar-btn {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    margin-left: 12px;
+    padding: 5px 10px;
+    border-radius: 11px;
+    border: 1px solid transparent;
+    background: rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    line-height: 1;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.15s, color 0.15s, border-color 0.15s,
+                opacity 0.3s ease,
+                max-width 0.55s cubic-bezier(0.22, 1, 0.36, 1),
+                margin-left 0.55s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.explore-bar-btn .ebb-icon { font-size: 9px; opacity: 0.8; }
+.explore-bar-btn:hover {
+    background: rgba(255, 255, 255, 0.14);
+    color: #fff;
+    border-color: rgba(255, 255, 255, 0.2);
+}
+.explore-bar-stop {
+    background: rgba(255, 107, 107, 0.16);
+    color: #ff9090;
+}
+.explore-bar-stop:hover {
+    background: rgba(255, 107, 107, 0.26);
+    color: #fff;
+    border-color: rgba(255, 107, 107, 0.5);
+}
+/* Collapse with the rest of the trailing bits during the brand-only intro. */
+#exploreBar.brand-only .explore-bar-btn {
+    max-width: 0;
+    margin-left: 0;
+    padding-left: 0;
+    padding-right: 0;
+    border-width: 0;
+    opacity: 0;
+    overflow: hidden;
+    pointer-events: none;
+}
+
+body.theme-light .explore-bar-btn {
+    background: rgba(0, 0, 0, 0.06);
+    color: rgba(0, 0, 0, 0.62);
+}
+body.theme-light .explore-bar-btn:hover {
+    background: rgba(0, 0, 0, 0.1);
+    color: #000;
+    border-color: rgba(0, 0, 0, 0.2);
+}
+body.theme-light .explore-bar-stop {
+    background: rgba(214, 48, 48, 0.12);
+    color: #c0392b;
+}
+body.theme-light .explore-bar-stop:hover {
+    background: rgba(214, 48, 48, 0.2);
+    color: #fff;
+    border-color: rgba(214, 48, 48, 0.5);
+}
+
 /* Light map style: the whole app is in theme-light and #exploreBar floats over
    a pale map, so its white decorative text/dividers need to go dark to stay
    legible (mirrors the --top-search-query flip for the regular search pill). */
@@ -2621,6 +2693,15 @@ body:has(#questionBox.loc-focused) .loc-header-block { display: block; }
     letter-spacing: -0.02em;
     overflow-wrap: break-word;
 }
+.loc-focus-context {
+    margin-top: 3px;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+}
+.loc-focus-context:empty { display: none; }
 .loc-focus-year {
     font-size: 12px;
     font-weight: 700;
@@ -3440,6 +3521,10 @@ body:has(#questionBox.loc-focused) .loc-header-block { display: block; }
         font-size: 12.5px;
     }
     .explore-bar-search-icon { margin-left: 10px; }
+    /* Tight on width — the manual controls go icon-only. */
+    .explore-bar-btn { margin-left: 8px; padding: 5px 7px; }
+    .explore-bar-btn .ebb-label { display: none; }
+    .explore-bar-btn .ebb-icon { font-size: 10px; }
     #exploreBar.brand-only .explore-bar-typewriter { flex-basis: 0; }
     #exploreBar.bar-status-visible .explore-bar-status {
         max-width: calc(100vw - 96px);

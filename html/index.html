@@ -22,7 +22,7 @@
     <div id="exploreHint" class="explore-hint" aria-hidden="true">
         <span class="explore-hint-arrow" aria-hidden="true"></span>
         <div class="explore-hint-text">
-            <p class="explore-hint-primary">Search any place,<br>era, or idea</p>
+            <p class="explore-hint-primary">Search any place,<br>timeline, idea…</p>
             <p class="explore-hint-secondary">or zoom and drag the map to explore</p>
         </div>
     </div>
@@ -79,6 +79,21 @@
              sighted users now just get from the logo + search icon. -->
         <span id="exploreBarStatus" class="explore-bar-status">Pan or zoom to discover places</span>
         <span class="explore-bar-search-icon" aria-hidden="true">&#128269;</span>
+        <!-- Manual discovery controls, kept compact inside the bar rather than
+             as a separate floating row. "Research area" forces a discovery
+             batch for the current map view on demand; "Stop" takes its place
+             while a batch is loading and aborts it. Both stopPropagation so a
+             tap on them doesn't trigger the bar's click-to-search. See
+             researchExploreArea / stopExploreSearch / updateExploreStopBtn in
+             js/main.js. -->
+        <button id="exploreResearchBtn" class="explore-bar-btn explore-bar-research" onclick="event.stopPropagation(); researchExploreArea()" title="Search this area for places now">
+            <span class="ebb-icon" aria-hidden="true">&#9673;</span>
+            <span class="ebb-label">Research area</span>
+        </button>
+        <button id="exploreStopBtn" class="explore-bar-btn explore-bar-stop" onclick="event.stopPropagation(); stopExploreSearch()" title="Stop searching" style="display:none">
+            <span class="ebb-icon" aria-hidden="true">&#9632;</span>
+            <span class="ebb-label">Stop</span>
+        </button>
     </div>
     <!-- Curate control for Explore mode — a separate fixed pill under
          #exploreBar (NOT inside it: the whole bar is a click-to-search
@@ -99,7 +114,7 @@
                 <input id="exploreFocusInput" class="ecp-focus-input" type="text" autocomplete="off"
                        placeholder="e.g. volcanoes, Author Birthplaces, Art Deco"
                        onkeydown="if (event.key === 'Enter') applyExploreCuration()">
-                <div class="ecp-hint">Anything you like — a theme, era, style, or subject.</div>
+                <div class="ecp-hint">Anything you like — a theme, timeline, style, or subject.</div>
             </div>
             <div class="ecp-section">
                 <div class="ecp-heading">Categories</div>
@@ -169,6 +184,7 @@
                 <div id="displayedQuestion" class="summary-title"></div>
                 <div id="locHeaderBlock" class="loc-header-block">
                     <div id="locHeaderTitle" class="loc-focus-title"></div>
+                    <div id="locHeaderContext" class="loc-focus-context"></div>
                 </div>
             </div>
             <div id="locHeaderEvent" class="loc-focus-event"></div>
@@ -330,6 +346,7 @@
         <button class="mp-close explore-detail-close" onclick="closeExploreDetail()" title="Back to exploring" aria-label="Close">&times;</button>
         <span id="edpCategory" class="explore-detail-category"></span>
         <div id="edpTitle" class="loc-focus-title"></div>
+        <div id="edpContext" class="loc-focus-context"></div>
         <div id="edpCoords" class="loc-focus-coords"></div>
     </div>
     <div id="edpSummaryPanel" class="explore-detail-summary-panel">
